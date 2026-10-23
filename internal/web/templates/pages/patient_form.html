@@ -1,0 +1,38 @@
+{{define "content"}}
+{{with .Data}}
+<section class="card narrow">
+  <header class="form-head">
+    <h1>{{if .IsEdit}}Editar ficha{{else}}Novo paciente{{end}}</h1>
+    {{if .IsEdit}}<span class="pid muted">{{.Patient.ID}}</span>{{end}}
+  </header>
+  <form class="form" method="post" action="{{if .IsEdit}}/pacientes/{{.Patient.ID}}{{else}}/pacientes{{end}}">
+    {{with .Errors}}{{with index . "_"}}<p class="field-error" role="alert">{{.}}</p>{{end}}{{end}}
+    <label>Nome *
+      <input type="text" name="nome" value="{{.Patient.Name}}" required autofocus autocomplete="name">
+      {{with .Errors}}{{with index . "name"}}<span class="field-error">{{.}}</span>{{end}}{{end}}
+    </label>
+    <div class="row">
+      <label>Telefone / WhatsApp
+        <input type="tel" name="telefone" value="{{.Patient.Phone}}" inputmode="tel" placeholder="(11) 98765-4321">
+      </label>
+      <label>Nascimento
+        <input type="date" name="nascimento" value="{{isoDate .Patient.BirthDate}}">
+      </label>
+    </div>
+    <label>Endereço (onde acontece o atendimento)
+      <input type="text" name="endereco" value="{{.Patient.Address}}" autocomplete="street-address" placeholder="Rua, número, complemento, bairro">
+    </label>
+    <label>Diagnóstico / motivo
+      <input type="text" name="diagnostico" value="{{.Patient.Diagnosis}}">
+    </label>
+    <label>Observações
+      <textarea name="observacoes" rows="3" placeholder="ex.: interfone 72, prefere manhã, cuidadora Ana">{{.Patient.Notes}}</textarea>
+    </label>
+    <footer class="form-actions">
+      <a class="btn ghost" href="{{if .IsEdit}}/pacientes/{{.Patient.ID}}{{else}}/pacientes{{end}}">Voltar</a>
+      <button type="submit" class="btn primary">{{template "icon-check"}}Salvar</button>
+    </footer>
+  </form>
+</section>
+{{end}}
+{{end}}

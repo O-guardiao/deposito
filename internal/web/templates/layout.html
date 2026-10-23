@@ -1,0 +1,33 @@
+{{define "layout"}}<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{.Title}} · Fisio</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}],"scrollBehavior":"instant"}'>
+  <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body data-flash="{{.Flash}}">
+<a class="skip-link" href="#main">Ir para o conteúdo</a>
+{{if .Demo}}<div class="demo-banner" role="note">MODO DEMO — dados em memória (não conecta ao Google)</div>{{end}}
+<header class="topbar">
+  <a class="brand" href="/agenda" aria-label="Fisio, início">{{template "icon-logo"}}<span>Fisio</span></a>
+  <nav class="tabs" aria-label="Seções">
+    <a href="/agenda" {{if eq .Section "agenda"}}aria-current="page"{{end}}>{{template "icon-calendar"}}<span>Agenda</span></a>
+    <a href="/pacientes" {{if eq .Section "pacientes"}}aria-current="page"{{end}}>{{template "icon-users"}}<span>Pacientes</span></a>
+  </nav>
+  <form method="post" action="/sincronizar" class="sync" hx-post="/sincronizar" hx-swap="none">
+    <button type="submit" class="btn ghost" title="Copiar a agenda do Google para a planilha">{{template "icon-sync"}}<span>Sincronizar</span></button>
+  </form>
+</header>
+<main id="main" class="container">
+{{template "content" .}}
+</main>
+<dialog id="modal" aria-label="Formulário"><div id="modal-body"></div></dialog>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>{{end}}

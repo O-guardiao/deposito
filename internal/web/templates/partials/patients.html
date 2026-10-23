@@ -1,0 +1,61 @@
+{{define "patient-list"}}
+<ul id="patient-list" class="patients" aria-live="polite">
+  {{if not .Patients}}
+  <li class="empty">
+    {{template "icon-users"}}
+    {{if .Query}}<p>Nenhum paciente encontrado para “{{.Query}}”.</p>{{else}}<p>Nenhum paciente cadastrado ainda.</p><p class="muted">Cadastre o primeiro em “Novo paciente”.</p>{{end}}
+  </li>
+  {{end}}
+  {{range .Patients}}
+  <li class="patient-card">
+    <a class="patient-main" href="/pacientes/{{.ID}}">
+      <span class="avatar" aria-hidden="true">{{initial .Name}}</span>
+      <span class="patient-info">
+        <strong>{{.Name}}</strong>
+        <span class="muted">{{if .Diagnosis}}{{.Diagnosis}}{{else}}Sem diagnóstico registrado{{end}}</span>
+        {{if .Address}}<span class="meta">{{template "icon-pin"}}{{.Address}}</span>{{end}}
+      </span>
+      <span class="pid muted">{{.ID}}</span>
+    </a>
+    {{if .Phone}}<a class="btn small ghost wa" href="{{waLink .Phone}}" target="_blank" rel="noopener" aria-label="Conversar com {{.Name}} no WhatsApp">{{template "icon-phone"}}{{fmtPhone .Phone}}</a>{{end}}
+  </li>
+  {{end}}
+</ul>
+{{end}}
+
+{{define "evolutions"}}
+<section id="evolutions" class="card" aria-labelledby="evo-title">
+  <h2 id="evo-title">Evolução</h2>
+  <form class="form" method="post" action="/pacientes/{{.Patient.ID}}/evolucoes" hx-post="/pacientes/{{.Patient.ID}}/evolucoes" hx-target="#evolutions" hx-swap="outerHTML">
+    {{with .EvoErrors}}{{with index . "_"}}<p class="field-error" role="alert">{{.}}</p>{{end}}{{end}}
+    <div class="row">
+      <label>Data
+        <input type="date" name="data" value="{{isoDate .EvoDate}}" required>
+        {{with .EvoErrors}}{{with index . "date"}}<span class="field-error">{{.}}</span>{{end}}{{end}}
+      </label>
+    </div>
+    <label>O que foi feito / como o paciente evoluiu
+      <textarea name="texto" rows="3" required placeholder="ex.: flexão de joelho 105°, dor 3/10, marcha com bengala">{{.EvoText}}</textarea>
+      {{with .EvoErrors}}{{with index . "text"}}<span class="field-error">{{.}}</span>{{end}}{{end}}
+    </label>
+    <div class="form-actions"><button type="submit" class="btn primary">{{template "icon-plus"}}Registrar evolução</button></div>
+  </form>
+  {{if not .Evolutions}}<p class="muted">Nenhuma evolução registrada ainda.</p>{{end}}
+  <ol class="timeline">
+    {{range .Evolutions}}
+    <li>
+      <time datetime="{{isoDate .Date}}">{{fmtDate .Date}}</time>
+      <p>{{.Text}}</p>
+    </li>
+    {{end}}
+  </ol>
+</section>
+{{end}}
+
+{{define "error"}}
+<section class="card error-page">
+  <h1>{{if eq .Status 404}}Não encontrado{{else}}Ops{{end}}</h1>
+  <p>{{.Message}}</p>
+  <a class="btn" href="/agenda">Voltar para a agenda</a>
+</section>
+{{end}}

@@ -1,0 +1,14 @@
+{{define "content"}}
+<section aria-labelledby="pac-title">
+  <header class="page-head">
+    <h1 id="pac-title">Pacientes</h1>
+    <a class="btn primary" href="/pacientes/novo">{{template "icon-plus"}}Novo paciente</a>
+  </header>
+  <form class="search" role="search" method="get" action="/pacientes">
+    <label class="sr-only" for="q">Buscar paciente</label>
+    <input id="q" type="search" name="q" value="{{.Data.Query}}" placeholder="Buscar por nome ou telefone…" autocomplete="off"
+           hx-get="/pacientes" hx-trigger="input changed delay:300ms, search" hx-target="#patient-list" hx-swap="outerHTML" hx-push-url="true">
+  </form>
+  {{template "patient-list" .Data}}
+</section>
+{{end}}

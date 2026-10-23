@@ -1,0 +1,9 @@
+{{define "content"}}
+<section class="card narrow connect">
+  <h1>Conectar com o Google</h1>
+  <p>O Fisio guarda os pacientes numa <strong>planilha do Google</strong> e os atendimentos no <strong>Google Agenda</strong> da sua conta. Nada fica em outro servidor.</p>
+  <p>Ao conectar, o app vai pedir permissão para ler e editar sua agenda e as planilhas que ele mesmo criar.</p>
+  {{with .Data}}{{with index . "Error"}}<p class="field-error" role="alert">{{.}}</p>{{end}}{{end}}
+  <a class="btn primary big" href="/auth/login">{{template "icon-google"}}Conectar com Google</a>
+</section>
+{{end}}
