@@ -64,7 +64,7 @@ func TestAgendaDayRendersSeededItems(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"<!doctype html>", "MODO DEMO", "Fisio: Maria Aparecida Souza", "Dona Lúcia", "Vincular", "Novo atendimento", "/static/htmx.min.js"} {
+	for _, want := range []string{"<!doctype html>", "MODO DEMO", "Maria Aparecida Souza", "Dona Lúcia", "Vincular", "Novo atendimento", "/static/htmx.min.js"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("day view missing %q", want)
 		}

@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -149,6 +150,15 @@ func templateFuncs(loc *time.Location) template.FuncMap {
 			return in(t).Format("2006-01-02") == in(now).Format("2006-01-02")
 		},
 		"fmtPhone": formatPhone,
+		"plural": func(n int, one, many string) string {
+			if n == 1 {
+				return one
+			}
+			return many
+		},
+		"mapLink": func(addr string) string {
+			return "https://www.google.com/maps/search/?api=1&query=" + url.QueryEscape(addr)
+		},
 		"initial": func(s string) string {
 			for _, r := range strings.TrimSpace(s) {
 				return strings.ToUpper(string(r))

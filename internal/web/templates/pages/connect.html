@@ -1,9 +1,19 @@
 {{define "content"}}
-<section class="card narrow connect">
-  <h1>Conectar com o Google</h1>
-  <p>O Fisio guarda os pacientes numa <strong>planilha do Google</strong> e os atendimentos no <strong>Google Agenda</strong> da sua conta. Nada fica em outro servidor.</p>
-  <p>Ao conectar, o app vai pedir permissão para ler e editar sua agenda e suas planilhas. Ele só mexe na planilha “Fisio - Pacientes” (criada na primeira vez) e nos eventos que você agendar por ele.</p>
-  {{with .Data}}{{with index . "Error"}}<p class="field-error" role="alert">{{.}}</p>{{end}}{{end}}
-  <a class="btn primary big" href="/auth/login">{{template "icon-google"}}Conectar com Google</a>
+<section class="connect mx-auto max-w-3xl">
+  <header class="grid justify-items-center gap-2 text-center">
+    <h1>Bem-vinda ao Fisio</h1>
+    <p class="muted max-w-xl">Sua agenda e as fichas dos pacientes, usando o Google Agenda e uma planilha da sua própria conta.</p>
+  </header>
+  <div class="card grid justify-items-center gap-2">{{template "illus-flow"}}</div>
+  <ol class="steps cols-3">
+    <li><strong>Conecte sua conta Google</strong><p>Uma vez só. O app pede permissão para ler e editar sua agenda e suas planilhas.</p></li>
+    <li><strong>Cadastre os pacientes</strong><p>A planilha “Fisio - Pacientes” é criada na sua conta na primeira vez.</p></li>
+    <li><strong>Marque atendimentos</strong><p>Pelo computador ou pelo Google Agenda no celular. Os lembretes chegam no celular.</p></li>
+  </ol>
+  {{with .Data}}{{with index . "Error"}}<p class="notice warn" role="alert">{{template "icon-info"}} {{.}}</p>{{end}}{{end}}
+  <div class="grid justify-items-center gap-2">
+    <a class="btn primary big" href="/auth/login">{{template "icon-google"}}Conectar com Google</a>
+    <a class="text-sm" href="/ajuda">Quero entender melhor antes</a>
+  </div>
 </section>
 {{end}}

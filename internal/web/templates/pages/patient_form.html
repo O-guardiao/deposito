@@ -1,28 +1,35 @@
 {{define "content"}}
 {{with .Data}}
 <section class="card narrow">
-  <header class="form-head">
-    <h1>{{if .IsEdit}}Editar ficha{{else}}Novo paciente{{end}}</h1>
-    {{if .IsEdit}}<span class="pid muted">{{.Patient.ID}}</span>{{end}}
+  <header class="form-head mb-4">
+    <div>
+      <h1>{{if .IsEdit}}Editar ficha{{else}}Novo paciente{{end}}</h1>
+      <p class="hint">Só o nome é obrigatório. O resto você completa quando quiser.</p>
+    </div>
+    {{if .IsEdit}}<span class="pid">{{.Patient.ID}}</span>{{end}}
   </header>
   <form class="form" method="post" action="{{if .IsEdit}}/pacientes/{{.Patient.ID}}{{else}}/pacientes{{end}}">
-    <label>Nome *
+    <label><span class="required">Nome</span>
       <input type="text" name="nome" value="{{.Patient.Name}}" required autofocus autocomplete="name">
       {{with fieldError .Errors "name"}}<span class="field-error">{{.}}</span>{{end}}
     </label>
     <div class="row">
       <label>Telefone / WhatsApp
         <input type="tel" name="telefone" value="{{.Patient.Phone}}" inputmode="tel" placeholder="(11) 98765-4321">
+        <span class="hint">Com DDD. Vira o botão de WhatsApp na lista.</span>
       </label>
-      <label>Nascimento
+      <label>Data de nascimento
         <input type="date" name="nascimento" value="{{isoDate .Patient.BirthDate}}">
+        <span class="hint">Mostra a idade na ficha.</span>
       </label>
     </div>
-    <label>Endereço (onde acontece o atendimento)
+    <label>Endereço do atendimento
       <input type="text" name="endereco" value="{{.Patient.Address}}" autocomplete="street-address" placeholder="Rua, número, complemento, bairro">
+      <span class="hint">Vai como local do evento no Google Agenda e abre o mapa no celular.</span>
     </label>
     <label>Diagnóstico / motivo
-      <input type="text" name="diagnostico" value="{{.Patient.Diagnosis}}">
+      <input type="text" name="diagnostico" value="{{.Patient.Diagnosis}}" placeholder="ex.: pós-operatório de joelho">
+      <span class="hint">Aparece na lista de pacientes para você lembrar do caso.</span>
     </label>
     <label>Observações
       <textarea name="observacoes" rows="3" placeholder="ex.: interfone 72, prefere manhã, cuidadora Ana">{{.Patient.Notes}}</textarea>

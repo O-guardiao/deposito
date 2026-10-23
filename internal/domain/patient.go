@@ -32,7 +32,10 @@ func (p Patient) Validate() error {
 
 // SessionTitle is the calendar summary used for this patient's sessions.
 // It is a domain rule shared by the use cases and the demo seed.
-func (p Patient) SessionTitle() string { return "Fisio: " + p.Name }
+// sessionTitlePrefix marks events created by the app; ShortTitle strips it for display.
+const sessionTitlePrefix = "Fisio: "
+
+func (p Patient) SessionTitle() string { return sessionTitlePrefix + p.Name }
 
 // Age returns the patient's age in full years at the given instant; ok is
 // false when the birth date is unknown.

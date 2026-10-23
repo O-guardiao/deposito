@@ -1,70 +1,91 @@
 {{define "agenda-day"}}
 <section id="agenda-main" class="agenda" aria-labelledby="agenda-title">
-  <header class="agenda-nav">
-    <a class="btn icon-btn" href="/agenda?data={{isoDate (addDays .Day.Date -1)}}" hx-get="/agenda?data={{isoDate (addDays .Day.Date -1)}}" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true" aria-label="Dia anterior">{{template "icon-chevron-left"}}</a>
-    <div class="agenda-title">
-      <h1 id="agenda-title">{{longDate .Day.Date}}</h1>
-      {{if isToday .Day.Date .Now}}<span class="badge today">Hoje</span>{{end}}
+  <header class="day-header card">
+    <div class="day-nav">
+      <a class="btn icon-btn" href="/agenda?data={{isoDate (addDays .Day.Date -1)}}" hx-get="/agenda?data={{isoDate (addDays .Day.Date -1)}}" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true" aria-label="Dia anterior">{{template "icon-chevron-left"}}</a>
+      <div class="day-title">
+        <h1 id="agenda-title">{{longDate .Day.Date}}</h1>
+        <p class="day-summary">
+          {{if isToday .Day.Date .Now}}<span class="badge today">Hoje</span>{{end}}
+          <span>{{with .Day.Count}}{{.}} {{plural . "atendimento" "atendimentos"}}{{else}}Nenhum atendimento{{end}}{{with .Day.UnlinkedCount}} · {{.}} {{plural . "compromisso marcado" "compromissos marcados"}} fora do app{{end}}</span>
+        </p>
+      </div>
+      <a class="btn icon-btn" href="/agenda?data={{isoDate (addDays .Day.Date 1)}}" hx-get="/agenda?data={{isoDate (addDays .Day.Date 1)}}" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true" aria-label="Próximo dia">{{template "icon-chevron-right"}}</a>
     </div>
-    <a class="btn icon-btn" href="/agenda?data={{isoDate (addDays .Day.Date 1)}}" hx-get="/agenda?data={{isoDate (addDays .Day.Date 1)}}" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true" aria-label="Próximo dia">{{template "icon-chevron-right"}}</a>
+    <div class="toolbar">
+      <a class="btn ghost" href="/agenda" hx-get="/agenda" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true">Hoje</a>
+      <a class="btn ghost" href="/agenda/semana?inicio={{isoDate .Day.Date}}">{{template "icon-calendar"}}Ver semana</a>
+      <button type="button" class="btn primary" hx-get="/agenda/novo?data={{isoDate .Day.Date}}&vista=dia" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-plus"}}Novo atendimento</button>
+    </div>
   </header>
-  <div class="toolbar">
-    <a class="btn ghost" href="/agenda" hx-get="/agenda" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true">Hoje</a>
-    <a class="btn ghost" href="/agenda/semana?inicio={{isoDate .Day.Date}}">Ver semana</a>
-    <button type="button" class="btn primary" hx-get="/agenda/novo?data={{isoDate .Day.Date}}&vista=dia" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-plus"}}Novo atendimento</button>
-  </div>
-  {{if .Notice}}<div class="notice warn" role="alert">{{.Notice}}</div>{{end}}
+  {{if .Notice}}<div class="notice warn" role="alert">{{template "icon-info"}} {{.Notice}}</div>{{end}}
   {{if not .Day.Items}}
   <div class="empty">
-    {{template "icon-calendar"}}
-    <p>Nenhum atendimento neste dia.</p>
-    <p class="muted">Use “Novo atendimento” ou marque direto no Google Agenda — aparece aqui.</p>
+    {{template "illus-free-day"}}
+    <p><strong>Dia livre.</strong></p>
+    <p>Marque um atendimento por aqui ou direto no Google Agenda do celular. Os dois lugares mostram a mesma agenda.</p>
+    <button type="button" class="btn primary" hx-get="/agenda/novo?data={{isoDate .Day.Date}}&vista=dia" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-plus"}}Marcar atendimento</button>
   </div>
   {{else}}
   <ul class="appointments">
     {{range .Day.Items}}{{template "appointment-item" (dict "A" . "Patients" $.Patients)}}{{end}}
   </ul>
   {{end}}
+  {{template "agenda-legend" false}}
 </section>
+{{end}}
+
+{{define "agenda-legend"}}
+<details class="legend"{{if .}} open{{end}}>
+  <summary>{{template "icon-help"}}O que significam as cores e os botões?</summary>
+  <ul>
+    <li><span class="swatch bg-sky-ink"></span><span><strong>Agendado</strong> — atendimento combinado. O Google Agenda avisa você antes.</span></li>
+    <li><span class="swatch bg-ok"></span><span><strong>Concluído</strong> — você já atendeu. Registre a evolução na ficha do paciente.</span></li>
+    <li><span class="swatch border border-dashed border-muted bg-surface-2"></span><span><strong>Marcado fora do app</strong> — criado no Google Agenda (celular). Escolha o paciente para ligar à ficha dele.</span></li>
+    <li><span class="swatch bg-danger"></span><span><strong>Cancelar</strong> — remove o atendimento também do Google Agenda. Para mudar o horário, use <strong>Remarcar</strong>.</span></li>
+  </ul>
+</details>
 {{end}}
 
 {{define "appointment-item"}}
 {{with .A}}
-<li class="appt status-{{.Status}} {{if not .Linked}}unlinked{{end}}">
+<li class="appt status-{{.Status}}{{if not .Linked}} unlinked{{end}}">
   <div class="appt-time">
-    {{if .AllDay}}<span>dia todo</span>{{else}}<time datetime="{{isoLocal .Start}}">{{fmtTime .Start}}</time><span class="muted">{{fmtTime .End}}</span>{{end}}
+    {{if .AllDay}}<span class="font-bold">dia todo</span>{{else}}<time datetime="{{isoLocal .Start}}">{{fmtTime .Start}}</time><span class="until">até {{fmtTime .End}}</span>{{end}}
   </div>
   <div class="appt-body">
     <div class="appt-head">
-      {{if .Linked}}<a class="appt-title" href="/pacientes/{{.PatientID}}">{{.Title}}</a>{{else}}<span class="appt-title">{{.Title}}</span>{{end}}
+      {{if .Linked}}<a class="appt-title" href="/pacientes/{{.PatientID}}" title="Abrir a ficha do paciente">{{.ShortTitle}}</a>{{else}}<span class="appt-title">{{.Title}}</span>{{end}}
       <span class="badge st-{{.Status}}">{{statusLabel .Status}}</span>
     </div>
-    {{if .Location}}<p class="meta">{{template "icon-pin"}}{{.Location}}</p>{{end}}
-    {{if .Notes}}<p class="meta notes">{{template "icon-note"}}{{.Notes}}</p>{{end}}
+    {{if .Location}}<p class="meta">{{template "icon-pin"}}<span>{{.Location}} · <a href="{{mapLink .Location}}" target="_blank" rel="noopener">abrir no mapa</a></span></p>{{end}}
+    {{if .Notes}}<p class="meta notes">{{template "icon-note"}}<span>{{.Notes}}</span></p>{{end}}
     {{if .Linked}}
     <div class="appt-actions">
-      {{if ne .Status "concluido"}}
+      {{if not .Done}}
       <form method="post" action="/agenda/{{.ID}}/concluir" hx-post="/agenda/{{.ID}}/concluir" hx-target="#agenda-main" hx-swap="outerHTML">
-        <button class="btn small" type="submit">{{template "icon-check"}}Concluir</button>
+        <button class="btn small" type="submit" title="Marcar como atendido">{{template "icon-check"}}Concluir</button>
       </form>
       {{end}}
-      <a class="btn small ghost" href="/agenda/{{.ID}}/editar" hx-get="/agenda/{{.ID}}/editar?vista=dia" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-clock"}}Remarcar</a>
-      {{if ne .Status "concluido"}}
-      <form method="post" action="/agenda/{{.ID}}/cancelar" hx-post="/agenda/{{.ID}}/cancelar" hx-target="#agenda-main" hx-swap="outerHTML" hx-confirm="Cancelar este atendimento? Ele será removido da agenda do Google.">
+      <a class="btn small ghost" href="/agenda/{{.ID}}/editar" hx-get="/agenda/{{.ID}}/editar?vista=dia" hx-target="#modal-body" hx-swap="innerHTML" title="Mudar dia ou horário">{{template "icon-clock"}}Remarcar</a>
+      {{if not .Done}}
+      <form method="post" action="/agenda/{{.ID}}/cancelar" hx-post="/agenda/{{.ID}}/cancelar" hx-target="#agenda-main" hx-swap="outerHTML" hx-confirm="Cancelar este atendimento? Ele será removido também do Google Agenda.">
         <button class="btn small danger" type="submit">{{template "icon-x"}}Cancelar</button>
       </form>
       {{end}}
     </div>
     {{else}}
-    <form class="link-form" method="post" action="/agenda/{{.ID}}/vincular" hx-post="/agenda/{{.ID}}/vincular" hx-target="#agenda-main" hx-swap="outerHTML">
-      <span class="muted">Marcado fora do app.</span>
-      <label class="sr-only" for="link-{{.ID}}">Vincular a paciente</label>
-      <select id="link-{{.ID}}" name="paciente" required>
-        <option value="">Vincular a um paciente…</option>
-        {{range $.Patients}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-      </select>
-      <button class="btn small" type="submit">{{template "icon-link"}}Vincular</button>
-    </form>
+    <div class="link-box">
+      <p class="hint m-0">{{template "icon-info"}} Criado direto no Google Agenda. Se for um atendimento, escolha o paciente para ligar à ficha dele.</p>
+      <form class="link-form" method="post" action="/agenda/{{.ID}}/vincular" hx-post="/agenda/{{.ID}}/vincular" hx-target="#agenda-main" hx-swap="outerHTML">
+        <label class="sr-only" for="link-{{.ID}}">Vincular a paciente</label>
+        <select id="link-{{.ID}}" name="paciente" required>
+          <option value="">Qual paciente é?</option>
+          {{range $.Patients}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+        <button class="btn small" type="submit">{{template "icon-link"}}Ligar à ficha</button>
+      </form>
+    </div>
     {{end}}
   </div>
 </li>
@@ -74,30 +95,33 @@
 {{define "agenda-week"}}
 {{$first := (index .Days 0).Date}}
 <section id="agenda-main" class="agenda week" aria-labelledby="agenda-title">
-  <header class="agenda-nav">
-    <a class="btn icon-btn" href="/agenda/semana?inicio={{isoDate (addDays $first -7)}}" hx-get="/agenda/semana?inicio={{isoDate (addDays $first -7)}}" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true" aria-label="Semana anterior">{{template "icon-chevron-left"}}</a>
-    <div class="agenda-title"><h1 id="agenda-title">Semana de {{fmtDateShort $first}} a {{fmtDateShort (addDays $first 6)}}</h1><span class="muted">{{monthYear $first}}</span></div>
-    <a class="btn icon-btn" href="/agenda/semana?inicio={{isoDate (addDays $first 7)}}" hx-get="/agenda/semana?inicio={{isoDate (addDays $first 7)}}" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true" aria-label="Próxima semana">{{template "icon-chevron-right"}}</a>
+  <header class="day-header card">
+    <div class="day-nav">
+      <a class="btn icon-btn" href="/agenda/semana?inicio={{isoDate (addDays $first -7)}}" hx-get="/agenda/semana?inicio={{isoDate (addDays $first -7)}}" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true" aria-label="Semana anterior">{{template "icon-chevron-left"}}</a>
+      <div class="day-title"><h1 id="agenda-title">Semana de {{fmtDateShort $first}} a {{fmtDateShort (addDays $first 6)}}</h1><p class="day-summary"><span>{{monthYear $first}}</span></p></div>
+      <a class="btn icon-btn" href="/agenda/semana?inicio={{isoDate (addDays $first 7)}}" hx-get="/agenda/semana?inicio={{isoDate (addDays $first 7)}}" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true" aria-label="Próxima semana">{{template "icon-chevron-right"}}</a>
+    </div>
+    <div class="toolbar">
+      <a class="btn ghost" href="/agenda/semana" hx-get="/agenda/semana" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true">Esta semana</a>
+      <a class="btn ghost" href="/agenda">{{template "icon-calendar"}}Ver dia</a>
+      <button type="button" class="btn primary" hx-get="/agenda/novo?data={{isoDate $first}}&vista=semana" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-plus"}}Novo atendimento</button>
+    </div>
   </header>
-  <div class="toolbar">
-    <a class="btn ghost" href="/agenda/semana" hx-get="/agenda/semana" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true">Esta semana</a>
-    <a class="btn ghost" href="/agenda">Ver dia</a>
-    <button type="button" class="btn primary" hx-get="/agenda/novo?data={{isoDate $first}}&vista=semana" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-plus"}}Novo atendimento</button>
-  </div>
-  {{if .Notice}}<div class="notice warn" role="alert">{{.Notice}}</div>{{end}}
+  {{if .Notice}}<div class="notice warn" role="alert">{{template "icon-info"}} {{.Notice}}</div>{{end}}
+  <p class="hint mb-3">Toque no dia para ver os detalhes e os botões de cada atendimento.</p>
   <div class="week-grid">
     {{range .Days}}
-    <article class="day-card {{if isToday .Date $.Now}}today{{end}}">
-      <a class="day-head" href="/agenda?data={{isoDate .Date}}">
+    <article class="day-card{{if isToday .Date $.Now}} today{{end}}">
+      <a class="day-head" href="/agenda?data={{isoDate .Date}}" title="Abrir este dia">
         <span class="dow">{{weekdayShort .Date}}</span>
         <span class="dom">{{fmtDateShort .Date}}</span>
       </a>
-      {{if not .Items}}<p class="muted small-text">livre</p>{{end}}
+      {{if not .Items}}<p class="free">livre</p>{{end}}
       <ul class="mini-list">
         {{range .Items}}
-        <li class="mini status-{{.Status}} {{if not .Linked}}unlinked{{end}}">
+        <li class="mini status-{{.Status}}{{if not .Linked}} unlinked{{end}}">
           <time>{{if .AllDay}}dia{{else}}{{fmtTime .Start}}{{end}}</time>
-          {{if .Linked}}<a href="/pacientes/{{.PatientID}}" title="{{.Title}}">{{.Title}}</a>{{else}}<span title="{{.Title}}">{{.Title}}</span>{{end}}
+          {{if .Linked}}<a href="/pacientes/{{.PatientID}}" title="{{.Title}}">{{.ShortTitle}}</a>{{else}}<span title="{{.Title}} (marcado fora do app)">{{.Title}}</span>{{end}}
         </li>
         {{end}}
       </ul>
@@ -115,18 +139,19 @@
     {{if .Modal}}<button type="button" class="btn icon-btn ghost" data-close-modal aria-label="Fechar">{{template "icon-x"}}</button>{{end}}
   </header>
   {{if .IsEdit}}
-    <p class="muted">{{.Appointment.Title}}</p>
+    <p class="chip">{{template "icon-users"}}{{.Appointment.ShortTitle}}</p>
   {{else}}
-  <label>Paciente
+  <label><span class="required">Paciente</span>
     <select name="paciente" required autofocus>
       <option value="">Escolha…</option>
       {{range .Patients}}<option value="{{.ID}}" {{if eq .ID $.Appointment.PatientID}}selected{{end}}>{{.Name}}</option>{{end}}
     </select>
+    <span class="hint">O nome do paciente vira o título do evento no Google Agenda. O endereço da ficha vira o local.</span>
     {{with fieldError .Errors "patientId"}}<span class="field-error">{{.}}</span>{{end}}
   </label>
   {{end}}
   <div class="row">
-    <label>Início
+    <label><span class="required">Dia e hora de início</span>
       <input type="datetime-local" name="inicio" value="{{isoLocal .Appointment.Start}}" required>
       {{with fieldError .Errors "start"}}<span class="field-error">{{.}}</span>{{end}}
     </label>
@@ -138,8 +163,9 @@
   </div>
   <label>Observações
     <textarea name="observacoes" rows="3" placeholder="ex.: levar theraband, interfone 72">{{.Appointment.Notes}}</textarea>
+    <span class="hint">Aparece na descrição do evento, então você vê no celular também.</span>
   </label>
-  <p class="muted small-text">Lembretes no Google Agenda: 1 dia antes e 1 hora antes.</p>
+  {{if not .Demo}}<p class="notice info m-0">{{template "icon-bell"}} O Google Agenda vai lembrar você 1 dia antes e 1 hora antes.</p>{{end}}
   <input type="hidden" name="voltar" value="{{.Return}}">
   <input type="hidden" name="vista" value="{{.View}}">
   <footer class="form-actions">

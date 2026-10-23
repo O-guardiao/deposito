@@ -43,6 +43,7 @@ type appointmentFormData struct {
 	// Modal is true when the form is rendered inside the modal (htmx); the
 	// full page version submits as a plain form and must carry no hx-target.
 	Modal bool
+	Demo  bool // hides Google-only hints (reminders) in demo mode
 }
 
 func (s *Server) dayData(r *http.Request, date time.Time, notice string) (agendaDayData, error) {
@@ -112,7 +113,7 @@ func (s *Server) handleAppointmentNew(w http.ResponseWriter, r *http.Request) {
 	data := appointmentFormData{
 		Appointment: domain.Appointment{PatientID: q.Get("paciente"), Start: start},
 		Patients:    patients, Minutes: s.defaultMinutes(),
-		Return: localPath(q.Get("voltar")), View: viewOf(q.Get("vista")), Modal: isHX(r),
+		Return: localPath(q.Get("voltar")), View: viewOf(q.Get("vista")), Modal: isHX(r), Demo: s.opts.Demo,
 	}
 	s.render(w, r, http.StatusOK, "appointment_form", "appointment-form", data)
 }
@@ -138,7 +139,7 @@ func (s *Server) handleAppointmentCreate(w http.ResponseWriter, r *http.Request)
 		data := appointmentFormData{
 			Appointment: domain.Appointment{PatientID: in.PatientID, Start: in.Start, Notes: in.Notes},
 			Patients:    patients, Minutes: int(in.Duration.Minutes()), Errors: fieldErrors(err),
-			Return: localPath(r.PostForm.Get("voltar")), View: viewOf(r.PostForm.Get("vista")), Modal: isHX(r),
+			Return: localPath(r.PostForm.Get("voltar")), View: viewOf(r.PostForm.Get("vista")), Modal: isHX(r), Demo: s.opts.Demo,
 		}
 		s.renderForm(w, r, data)
 		return
@@ -163,7 +164,7 @@ func (s *Server) handleAppointmentEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	data := appointmentFormData{Appointment: a, Patients: patients, Minutes: mins, IsEdit: true,
-		Return: localPath(q.Get("voltar")), View: viewOf(q.Get("vista")), Modal: isHX(r)}
+		Return: localPath(q.Get("voltar")), View: viewOf(q.Get("vista")), Modal: isHX(r), Demo: s.opts.Demo}
 	s.render(w, r, http.StatusOK, "appointment_form", "appointment-form", data)
 }
 
@@ -192,7 +193,7 @@ func (s *Server) handleAppointmentUpdate(w http.ResponseWriter, r *http.Request)
 		cur.Start, cur.Notes = in.Start, in.Notes
 		patients, _ := s.svc().Patients.List(r.Context())
 		data := appointmentFormData{Appointment: cur, Patients: patients, Minutes: int(in.Duration.Minutes()), Errors: fieldErrors(err), IsEdit: true,
-			Return: localPath(r.PostForm.Get("voltar")), View: viewOf(r.PostForm.Get("vista")), Modal: isHX(r)}
+			Return: localPath(r.PostForm.Get("voltar")), View: viewOf(r.PostForm.Get("vista")), Modal: isHX(r), Demo: s.opts.Demo}
 		s.renderForm(w, r, data)
 		return
 	}

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"time"
 )
 
@@ -43,6 +44,12 @@ type Appointment struct {
 
 // Linked reports whether the appointment belongs to a known patient.
 func (a Appointment) Linked() bool { return a.PatientID != "" }
+
+// Done reports whether the session already happened and was marked as such.
+func (a Appointment) Done() bool { return a.Status == StatusDone }
+
+// ShortTitle is the title without the app prefix, for compact views.
+func (a Appointment) ShortTitle() string { return strings.TrimPrefix(a.Title, sessionTitlePrefix) }
 
 // Validate checks times and required fields.
 func (a Appointment) Validate() error {

@@ -45,6 +45,20 @@ type DayView struct {
 	Items []domain.Appointment
 }
 
+// Count is the number of sessions linked to a patient.
+func (d DayView) Count() int { return len(d.Items) - d.UnlinkedCount() }
+
+// UnlinkedCount is the number of events created outside the app (no patient yet).
+func (d DayView) UnlinkedCount() int {
+	n := 0
+	for _, a := range d.Items {
+		if !a.Linked() {
+			n++
+		}
+	}
+	return n
+}
+
 // WriteResult is the outcome of a successful agenda write. MirrorWarning is
 // non-nil when the live agenda was updated but the spreadsheet mirror could
 // not be; the appointment is valid and persisted either way, so callers show

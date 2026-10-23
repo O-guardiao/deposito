@@ -1,0 +1,13 @@
+{
+  "name": "fisio-styles",
+  "private": true,
+  "description": "Gera internal/web/static/app.css a partir de internal/web/styles/app.css com Tailwind v4. O CSS gerado é commitado e embutido no binário Go; Node só é necessário para quem altera o estilo.",
+  "scripts": {
+    "css": "tailwindcss -i internal/web/styles/app.css -o internal/web/static/app.css --minify",
+    "css:watch": "tailwindcss -i internal/web/styles/app.css -o internal/web/static/app.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "tailwindcss": "^4.3.3"
+  }
+}

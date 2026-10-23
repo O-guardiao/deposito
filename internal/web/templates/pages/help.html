@@ -1,0 +1,40 @@
+{{define "content"}}
+<article class="grid gap-6">
+  <header class="page-head">
+    <div>
+      <h1>Como o Fisio funciona</h1>
+      <p class="muted">Um lugar para a agenda e as fichas dos pacientes, usando a sua conta do Google.</p>
+    </div>
+  </header>
+
+  <section class="card grid justify-items-center gap-3 text-center">
+    {{template "illus-flow"}}
+    <p class="max-w-2xl text-sm text-muted">Os atendimentos moram no <strong class="text-ink">Google Agenda</strong>. O Fisio mostra e edita essa mesma agenda no computador, e guarda os pacientes e as evoluções numa <strong class="text-ink">planilha do Google</strong>. Nada fica em outro servidor.</p>
+  </section>
+
+  <section aria-labelledby="passos">
+    <h2 id="passos" class="mb-3">Em 4 passos</h2>
+    <ol class="steps cols-4">
+      <li><strong>Cadastre o paciente</strong><p>Nome, WhatsApp e endereço. O endereço vira o local do atendimento no Google Agenda, com link para o mapa.</p></li>
+      <li><strong>Marque o atendimento</strong><p>Pelo botão “Novo atendimento” ou direto no Google Agenda do celular. Os dois mostram a mesma coisa.</p></li>
+      <li><strong>Receba os lembretes</strong><p>O Google Agenda avisa 1 dia antes e 1 hora antes. Olhe o celular, mande mensagem ao paciente e vá.</p></li>
+      <li><strong>Registre a evolução</strong><p>Depois do atendimento, marque como concluído e anote na ficha como o paciente está.</p></li>
+    </ol>
+  </section>
+
+  <section aria-label="Cores e botões">
+    {{template "agenda-legend" true}}
+  </section>
+
+  <section aria-labelledby="duvidas" class="grid gap-3">
+    <h2 id="duvidas">Dúvidas comuns</h2>
+    <div class="faq">
+      <details><summary>Marquei pelo celular. Onde aparece?</summary><p>Na agenda do Fisio, no mesmo dia e horário, como “marcado fora do app”. Escolha o paciente no card para ligar o atendimento à ficha dele. Depois disso ele aparece no histórico do paciente.</p></details>
+      <details><summary>Cancelei no Fisio. Some do celular?</summary><p>Sim. Cancelar remove o evento do Google Agenda. Se quiser só mudar o horário, use “Remarcar”.</p></details>
+      <details><summary>O que faz o botão “Atualizar planilha”?</summary><p>Copia todos os atendimentos do Google Agenda para a aba “Agendamentos” da planilha. Útil quando você marcou ou mudou várias coisas pelo celular e quer a planilha em dia. Os pacientes e as evoluções já são salvos na hora.</p></details>
+      <details><summary>Posso editar a planilha direto?</summary><p>Pode. Corrigir um telefone ou um endereço na planilha funciona; o Fisio lê de lá. Só não mude a primeira linha (os títulos) nem a coluna ID.</p></details>
+      <details><summary>Preciso deixar o computador ligado?</summary><p>Não. O Fisio só precisa estar aberto quando você usa o computador. Os lembretes vêm do Google Agenda, que funciona sozinho no celular.</p></details>
+    </div>
+  </section>
+</article>
+{{end}}

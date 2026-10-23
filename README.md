@@ -133,6 +133,26 @@ Nos eventos da agenda, o app grava propriedades privadas (`fisio_patient_id`,
 `fisio_status`) — invisíveis no celular, mas é assim que ele sabe de quem é o
 evento.
 
+## Interface e estilo (Tailwind v4 + SVG)
+
+A interface é feita para quem não é da área de tecnologia: navegação com ícone e texto
+(barra inferior no celular), textos explicativos nos formulários, legenda das cores na
+agenda, estados vazios com ilustração e uma página **Ajuda** (`/ajuda`) com o diagrama
+de como celular, Google Agenda, app e planilha conversam.
+
+O CSS é gerado pelo [Tailwind CSS v4](https://tailwindcss.com) a partir de
+`internal/web/styles/app.css` e salvo em `internal/web/static/app.css`, que é
+**commitado e embutido no binário**. Quem só roda o app não precisa de Node.
+Quem mexer no estilo ou nos templates roda:
+
+```bash
+make css          # instala o Tailwind (npm) e gera internal/web/static/app.css
+make css-watch    # regenera a cada alteração
+```
+
+Ícones e ilustrações são SVG inline em `internal/web/templates/partials/icons.html`
+e `illustrations.html`, coloridos pelos tokens do tema (claro/escuro automático).
+
 ## Estrutura do código
 
 ```

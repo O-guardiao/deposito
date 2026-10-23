@@ -1,13 +1,13 @@
-# segredos e estado local
-credentials.json
-token.json
-data/
-.env
 
 # binários
-bin/
-/fisio
-*.exe
-
 # ferramentas
+# segredos e estado local
+*.exe
+.env
 .loop/runs/*/tmp/
+/fisio
+bin/
+credentials.json
+data/
+node_modules/
+token.json

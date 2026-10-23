@@ -1,44 +1,47 @@
 {{define "content"}}
 {{with .Data}}
-<article class="record">
-  <header class="page-head record-head">
-    <div>
-      <p class="muted"><a href="/pacientes">Pacientes</a> › <span class="pid">{{.Patient.ID}}</span></p>
-      <h1>{{.Patient.Name}}</h1>
-      <p class="muted">
-        {{$age := age .Patient .Now}}{{if ge $age 0}}{{$age}} anos · {{end}}
-        {{if .Patient.Diagnosis}}{{.Patient.Diagnosis}}{{else}}sem diagnóstico registrado{{end}}
-      </p>
+<article class="record grid gap-4">
+  <nav class="text-sm" aria-label="Caminho"><a href="/pacientes">Pacientes</a> <span class="muted">›</span> <span class="pid">{{.Patient.ID}}</span></nav>
+  <header class="page-head card">
+    <div class="flex min-w-0 items-center gap-4">
+      <span class="avatar lg" aria-hidden="true">{{initial .Patient.Name}}</span>
+      <div class="min-w-0">
+        <h1>{{.Patient.Name}}</h1>
+        <p class="mt-1 flex flex-wrap gap-2">
+          {{$age := age .Patient .Now}}{{if ge $age 0}}<span class="chip">{{$age}} anos</span>{{end}}
+          <span class="chip">{{if .Patient.Diagnosis}}{{.Patient.Diagnosis}}{{else}}sem diagnóstico registrado{{end}}</span>
+        </p>
+      </div>
     </div>
     <div class="actions">
       <button type="button" class="btn primary" hx-get="/agenda/novo?paciente={{.Patient.ID}}&voltar={{.CurrentPath}}" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-plus"}}Agendar</button>
-      <a class="btn ghost" href="/pacientes/{{.Patient.ID}}/editar">{{template "icon-edit"}}Editar</a>
+      <a class="btn ghost" href="/pacientes/{{.Patient.ID}}/editar">{{template "icon-edit"}}Editar ficha</a>
     </div>
   </header>
 
-  <div class="grid-2">
+  <div class="grid gap-4 md:grid-cols-2">
     <section class="card" aria-labelledby="dados-title">
-      <h2 id="dados-title">Dados</h2>
+      <h2 id="dados-title" class="mb-3">Dados</h2>
       <dl class="details">
-        <dt>Telefone</dt><dd>{{if .Patient.Phone}}<a href="{{waLink .Patient.Phone}}" target="_blank" rel="noopener">{{template "icon-phone"}}{{fmtPhone .Patient.Phone}}</a>{{else}}<span class="muted">—</span>{{end}}</dd>
-        <dt>Endereço</dt><dd>{{if .Patient.Address}}{{.Patient.Address}}{{else}}<span class="muted">—</span>{{end}}</dd>
-        <dt>Nascimento</dt><dd>{{if .Patient.BirthDate.IsZero}}<span class="muted">—</span>{{else}}{{fmtDate .Patient.BirthDate}}{{end}}</dd>
-        <dt>Observações</dt><dd>{{if .Patient.Notes}}{{.Patient.Notes}}{{else}}<span class="muted">—</span>{{end}}</dd>
+        <dt>WhatsApp</dt><dd>{{if .Patient.Phone}}<a class="btn small wa" href="{{waLink .Patient.Phone}}" target="_blank" rel="noopener">{{template "icon-chat"}}{{fmtPhone .Patient.Phone}}</a>{{else}}<span class="muted">não informado</span>{{end}}</dd>
+        <dt>Endereço</dt><dd>{{if .Patient.Address}}{{.Patient.Address}}<br><a class="text-sm" href="{{mapLink .Patient.Address}}" target="_blank" rel="noopener">{{template "icon-map"}} abrir no mapa</a>{{else}}<span class="muted">não informado</span>{{end}}</dd>
+        <dt>Nascimento</dt><dd>{{if .Patient.BirthDate.IsZero}}<span class="muted">não informado</span>{{else}}{{fmtDate .Patient.BirthDate}}{{end}}</dd>
+        <dt>Observações</dt><dd>{{if .Patient.Notes}}{{.Patient.Notes}}{{else}}<span class="muted">nenhuma</span>{{end}}</dd>
         <dt>Cadastro</dt><dd class="muted">{{fmtDate .Patient.CreatedAt}}</dd>
       </dl>
     </section>
 
     <section class="card" aria-labelledby="prox-title">
-      <h2 id="prox-title">Próximos atendimentos</h2>
-      {{if not .Upcoming}}<p class="muted">Nada marcado. Use “Agendar”.</p>{{end}}
+      <h2 id="prox-title" class="mb-3">Próximos atendimentos</h2>
+      {{if not .Upcoming}}<p class="hint">Nada marcado. Toque em <strong>Agendar</strong> para combinar o próximo.</p>{{end}}
       <ul class="simple-list">
         {{range .Upcoming}}
-        <li><a href="/agenda?data={{isoDate .Start}}"><strong>{{fmtDate .Start}}</strong> {{weekday .Start}} às {{fmtTime .Start}}</a> <span class="badge st-{{.Status}}">{{statusLabel .Status}}</span>{{if .Notes}}<span class="muted"> · {{.Notes}}</span>{{end}}</li>
+        <li><a href="/agenda?data={{isoDate .Start}}"><strong>{{fmtDate .Start}}</strong> {{weekday .Start}} às {{fmtTime .Start}}</a> <span class="badge st-{{.Status}}">{{statusLabel .Status}}</span>{{if .Notes}}<span class="muted text-sm">· {{.Notes}}</span>{{end}}</li>
         {{end}}
       </ul>
       {{if .Past}}
-      <h3>Histórico</h3>
-      <ul class="simple-list compact">
+      <h3 class="mt-4 mb-2 text-muted">Já atendidos</h3>
+      <ul class="simple-list text-sm">
         {{range .Past}}
         <li><a href="/agenda?data={{isoDate .Start}}">{{fmtDate .Start}} {{fmtTime .Start}}</a> <span class="badge st-{{.Status}}">{{statusLabel .Status}}</span></li>
         {{end}}

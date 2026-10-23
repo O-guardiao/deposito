@@ -29,6 +29,7 @@ var pages = map[string]pageMeta{
 	"patient_record":   {"Pacientes", "pacientes"},
 	"connect":          {"Conectar", "agenda"},
 	"error":            {"Fisio", "agenda"},
+	"help":             {"Ajuda", "ajuda"},
 }
 
 // render writes a full page, or just the partial when the request came from htmx.

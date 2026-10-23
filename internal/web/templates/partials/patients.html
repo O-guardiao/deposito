@@ -2,22 +2,22 @@
 <ul id="patient-list" class="patients" aria-live="polite">
   {{if not .Patients}}
   <li class="empty">
-    {{template "icon-users"}}
-    {{if .Query}}<p>Nenhum paciente encontrado para “{{.Query}}”.</p>{{else}}<p>Nenhum paciente cadastrado ainda.</p><p class="muted">Cadastre o primeiro em “Novo paciente”.</p>{{end}}
+    {{template "illus-no-patients"}}
+    {{if .Query}}<p><strong>Nenhum paciente encontrado para “{{.Query}}”.</strong></p><p>Confira a grafia ou cadastre a pessoa em “Novo paciente”.</p>{{else}}<p><strong>Nenhum paciente cadastrado ainda.</strong></p><p>Cada paciente ganha uma ficha com telefone, endereço, atendimentos e evolução. Tudo fica guardado na sua planilha do Google.</p><a class="btn primary" href="/pacientes/novo">{{template "icon-plus"}}Cadastrar o primeiro paciente</a>{{end}}
   </li>
   {{end}}
   {{range .Patients}}
   <li class="patient-card">
-    <a class="patient-main" href="/pacientes/{{.ID}}">
+    <a class="patient-main" href="/pacientes/{{.ID}}" title="Abrir a ficha">
       <span class="avatar" aria-hidden="true">{{initial .Name}}</span>
       <span class="patient-info">
         <strong>{{.Name}}</strong>
-        <span class="muted">{{if .Diagnosis}}{{.Diagnosis}}{{else}}Sem diagnóstico registrado{{end}}</span>
-        {{if .Address}}<span class="meta">{{template "icon-pin"}}{{.Address}}</span>{{end}}
+        <span class="muted text-sm">{{if .Diagnosis}}{{.Diagnosis}}{{else}}Sem diagnóstico registrado{{end}}</span>
+        {{if .Address}}<span class="meta">{{template "icon-pin"}}<span>{{.Address}}</span></span>{{end}}
       </span>
-      <span class="pid muted">{{.ID}}</span>
+      <span class="pid">{{.ID}}</span>
     </a>
-    {{if .Phone}}<a class="btn small ghost wa" href="{{waLink .Phone}}" target="_blank" rel="noopener" aria-label="Conversar com {{.Name}} no WhatsApp">{{template "icon-phone"}}{{fmtPhone .Phone}}</a>{{end}}
+    {{if .Phone}}<a class="btn small wa" href="{{waLink .Phone}}" target="_blank" rel="noopener" aria-label="Conversar com {{.Name}} no WhatsApp" title="{{fmtPhone .Phone}}">{{template "icon-chat"}}WhatsApp</a>{{end}}
   </li>
   {{end}}
 </ul>
@@ -26,20 +26,21 @@
 {{define "evolutions"}}
 <section id="evolutions" class="card" aria-labelledby="evo-title">
   <h2 id="evo-title">Evolução</h2>
+  <p class="hint mb-3">Anote o que foi feito em cada atendimento e como o paciente está. Fica guardado na aba “Evolucoes” da planilha.</p>
   <form class="form" method="post" action="/pacientes/{{.Patient.ID}}/evolucoes" hx-post="/pacientes/{{.Patient.ID}}/evolucoes" hx-target="#evolutions" hx-swap="outerHTML">
     <div class="row">
-      <label>Data
+      <label>Data do atendimento
         <input type="date" name="data" value="{{isoDate .EvoDate}}" required>
         {{with fieldError .EvoErrors "date"}}<span class="field-error">{{.}}</span>{{end}}
       </label>
     </div>
-    <label>O que foi feito / como o paciente evoluiu
+    <label><span class="required">O que foi feito e como o paciente evoluiu</span>
       <textarea name="texto" rows="3" required placeholder="ex.: flexão de joelho 105°, dor 3/10, marcha com bengala">{{.EvoText}}</textarea>
       {{with fieldError .EvoErrors "text"}}<span class="field-error">{{.}}</span>{{end}}
     </label>
     <div class="form-actions"><button type="submit" class="btn primary">{{template "icon-plus"}}Registrar evolução</button></div>
   </form>
-  {{if not .Evolutions}}<p class="muted">Nenhuma evolução registrada ainda.</p>{{end}}
+  {{if not .Evolutions}}<p class="hint mt-4">Nenhuma evolução registrada ainda. A primeira aparece aqui assim que você salvar.</p>{{end}}
   <ol class="timeline">
     {{range .Evolutions}}
     <li>
@@ -53,8 +54,8 @@
 
 {{define "error"}}
 <section class="card error-page">
-  <h1>{{if eq .Status 404}}Não encontrado{{else}}Ops{{end}}</h1>
-  <p>{{.Message}}</p>
-  <a class="btn" href="/agenda">Voltar para a agenda</a>
+  <h1>{{if eq .Status 404}}Não encontrado{{else}}Algo deu errado{{end}}</h1>
+  <p class="muted">{{.Message}}</p>
+  <a class="btn primary" href="/agenda">{{template "icon-calendar"}}Voltar para a agenda</a>
 </section>
 {{end}}

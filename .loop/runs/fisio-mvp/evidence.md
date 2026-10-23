@@ -82,3 +82,9 @@ ok  	github.com/o-guardiao/deposito/internal/adapters/ids	1.015s	coverage: 100.0
 ok  	github.com/o-guardiao/deposito/internal/adapters/memory	1.013s	coverage: 33.3% of statements
 ok  	github.com/o-guardiao/deposito/internal/app	1.020s	coverage: 80.8% of statements
 ok  	github.com/o-guardiao/deposito/internal/web	1.158s	coverage: 80.1% of statements
+
+## Redesign (Tailwind v4 + SVG, didático) — 2026-10-23
+- `npm run css` → app.css 42 KB minificado; `gofmt -l .` vazio; `go vet` ok; `go test -race -count=1 ./...` ok (web test atualizado: título exibido sem o prefixo "Fisio: ").
+- E2E Playwright (scratchpad/e2e/run.mjs) contra `fisio -demo :8095`: `fails: 0` (mobile 390px + desktop 1280px; inclui fluxo do modal, remarcar, agendar pela ficha, semana).
+- Capturas (scratchpad/design/shots, 42 arquivos): agenda, semana, pacientes, ficha, novo paciente, ajuda, dia livre, 404, modal, legenda, conectar (instância Google com credenciais falsas), claro e escuro; `scrollWidth == innerWidth` em todas as páginas a 390px; 0 pageerror.
+- Nova página pública `/ajuda`; navegação inferior no celular; "Sincronizar" → "Atualizar planilha"; legenda de cores; dicas nos formulários; link "abrir no mapa".

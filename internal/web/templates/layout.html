@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <title>{{.Title}} · Fisio</title>
   <link rel="stylesheet" href="{{asset "app.css"}}">
@@ -15,18 +15,26 @@
 <a class="skip-link" href="#main">Ir para o conteúdo</a>
 {{if .Demo}}<div class="demo-banner" role="note">MODO DEMO — dados em memória (não conecta ao Google)</div>{{end}}
 <header class="topbar">
-  <a class="brand" href="/agenda" aria-label="Fisio, início">{{template "icon-logo"}}<span>Fisio</span></a>
-  <nav class="tabs" aria-label="Seções">
-    <a href="/agenda" {{if eq .Section "agenda"}}aria-current="page"{{end}}>{{template "icon-calendar"}}<span>Agenda</span></a>
-    <a href="/pacientes" {{if eq .Section "pacientes"}}aria-current="page"{{end}}>{{template "icon-users"}}<span>Pacientes</span></a>
-  </nav>
-  <form method="post" action="/sincronizar" class="sync" hx-post="/sincronizar" hx-swap="none">
-    <button type="submit" class="btn ghost" title="Copiar a agenda do Google para a planilha">{{template "icon-sync"}}<span>Sincronizar</span></button>
-  </form>
+  <div class="topbar-inner">
+    <a class="brand" href="/agenda" aria-label="Fisio, início">{{template "icon-logo"}}<span>Fisio</span></a>
+    <nav class="tabs" aria-label="Seções">
+      <a href="/agenda" {{if eq .Section "agenda"}}aria-current="page"{{end}}>{{template "icon-calendar"}}<span>Agenda</span></a>
+      <a href="/pacientes" {{if eq .Section "pacientes"}}aria-current="page"{{end}}>{{template "icon-users"}}<span>Pacientes</span></a>
+      <a href="/ajuda" {{if eq .Section "ajuda"}}aria-current="page"{{end}}>{{template "icon-help"}}<span>Ajuda</span></a>
+    </nav>
+    <form method="post" action="/sincronizar" class="sync" hx-post="/sincronizar" hx-swap="none">
+      <button type="submit" class="btn ghost" title="Copia os atendimentos do Google Agenda para a aba Agendamentos da planilha">{{template "icon-sync"}}<span class="hidden sm:inline">Atualizar planilha</span><span class="sm:hidden">Planilha</span></button>
+    </form>
+  </div>
 </header>
 <main id="main" class="container">
 {{template "content" .}}
 </main>
+<nav class="bottom-nav" aria-label="Seções">
+  <a href="/agenda" {{if eq .Section "agenda"}}aria-current="page"{{end}}>{{template "icon-calendar"}}<span>Agenda</span></a>
+  <a href="/pacientes" {{if eq .Section "pacientes"}}aria-current="page"{{end}}>{{template "icon-users"}}<span>Pacientes</span></a>
+  <a href="/ajuda" {{if eq .Section "ajuda"}}aria-current="page"{{end}}>{{template "icon-help"}}<span>Ajuda</span></a>
+</nav>
 <dialog id="modal" aria-label="Formulário"><div id="modal-body"></div></dialog>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
