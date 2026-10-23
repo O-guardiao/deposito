@@ -72,4 +72,17 @@ func TestAllDayEvent(t *testing.T) {
 	if back.Start.Date != "2026-11-15" || back.End.Date != "2026-11-16" {
 		t.Fatalf("all-day not preserved: %+v %+v", back.Start, back.End)
 	}
+	if forPatch(back).Start.NullFields != nil {
+		t.Fatal("an all-day patch must not null its own date")
+	}
+}
+
+func TestUnknownStatusPropertyIsScheduled(t *testing.T) {
+	ev := &calendar.Event{Id: "x", Summary: "S",
+		ExtendedProperties: &calendar.EventExtendedProperties{Private: map[string]string{propPatientID: "P1", propStatus: "garbage"}},
+		Start:              &calendar.EventDateTime{DateTime: "2026-10-23T08:00:00Z"}, End: &calendar.EventDateTime{DateTime: "2026-10-23T09:00:00Z"}}
+	out, err := eventToAppointment(ev, time.UTC)
+	if err != nil || out.Status != domain.StatusScheduled || out.PatientID != "P1" {
+		t.Fatalf("unexpected: %v %+v", err, out)
+	}
 }

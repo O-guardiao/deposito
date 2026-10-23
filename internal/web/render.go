@@ -2,7 +2,9 @@ package web
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -31,6 +33,22 @@ type Renderer struct {
 	partials *template.Template
 	loc      *time.Location
 }
+
+// assetVersion is a short hash of the embedded static files, appended to
+// their URLs so browsers cache aggressively yet pick up every upgrade.
+var assetVersion = func() string {
+	h := sha256.New()
+	_ = fs.WalkDir(staticFS(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, _ := fs.ReadFile(staticFS(), p)
+		h.Write([]byte(p))
+		h.Write(b)
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}()
 
 // NewRenderer parses every template under templates/.
 func NewRenderer(loc *time.Location) (*Renderer, error) {
@@ -120,7 +138,7 @@ func templateFuncs(loc *time.Location) template.FuncMap {
 		"weekdayShort": func(t time.Time) string { return strings.ToUpper(weekdaysPT[in(t).Weekday()][:3]) },
 		"longDate": func(t time.Time) string {
 			t = in(t)
-			return fmt.Sprintf("%s, %d de %s de %d", weekdaysPT[t.Weekday()], t.Day(), monthsPT[t.Month()], t.Year())
+			return fmt.Sprintf("%s, %d de %s de %d", capitalize(weekdaysPT[t.Weekday()]), t.Day(), monthsPT[t.Month()], t.Year())
 		},
 		"monthYear": func(t time.Time) string {
 			t = in(t)
@@ -137,8 +155,24 @@ func templateFuncs(loc *time.Location) template.FuncMap {
 			}
 			return "?"
 		},
-		"durationOptions": func() []int { return []int{30, 45, 60, 90, 120} },
-		"minutes":         func(d time.Duration) int { return int(d.Minutes()) },
+		"durationOptions": func(selected int) []int {
+			opts := []int{30, 45, 60, 90, 120}
+			for _, o := range opts {
+				if o == selected {
+					return opts
+				}
+			}
+			return append(opts, selected)
+		},
+		"minutes": func(d time.Duration) int { return int(d.Minutes()) },
+		"asset":   func(name string) string { return "/static/" + name + "?v=" + assetVersion },
+		"fieldError": func(errs map[string]string, key string) string {
+			if errs == nil {
+				return ""
+			}
+			return errs[key]
+		},
+		"capitalize": capitalize,
 		"statusLabel": func(st domain.AppointmentStatus) string {
 			switch st {
 			case domain.StatusDone:
@@ -149,7 +183,12 @@ func templateFuncs(loc *time.Location) template.FuncMap {
 				return "Agendado"
 			}
 		},
-		"age": func(p domain.Patient, now time.Time) int { return p.Age(now) },
+		"age": func(p domain.Patient, now time.Time) int {
+			if y, ok := p.Age(now); ok {
+				return y
+			}
+			return -1
+		},
 		"dict": func(kv ...any) map[string]any {
 			m := make(map[string]any, len(kv)/2)
 			for i := 0; i+1 < len(kv); i += 2 {
@@ -168,6 +207,14 @@ func templateFuncs(loc *time.Location) template.FuncMap {
 			return "https://wa.me/" + digits
 		},
 	}
+}
+
+// capitalize upper-cases the first rune only (pt-BR keeps "de" lower).
+func capitalize(s string) string {
+	for i, r := range s {
+		return strings.ToUpper(string(r)) + s[i+len(string(r)):]
+	}
+	return s
 }
 
 func onlyDigits(s string) string {

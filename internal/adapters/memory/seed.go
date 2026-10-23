@@ -74,7 +74,7 @@ func (s *Store) SeedDemo(now time.Time, loc *time.Location) {
 				status = domain.StatusDone
 			}
 			a, _ := s.Agenda.Create(ctx, domain.Appointment{
-				PatientID: p.ID, Title: "Fisio: " + p.Name, Start: st, End: st.Add(time.Hour),
+				PatientID: p.ID, Title: p.SessionTitle(), Start: st, End: st.Add(time.Hour),
 				Status: status, Location: p.Address, UpdatedAt: now,
 			})
 			_ = s.Mirror.Upsert(ctx, a)

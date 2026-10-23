@@ -1,13 +1,14 @@
 package web
 
 import (
-	"errors"
+	"encoding/json"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
-	"github.com/o-guardiao/deposito/internal/app"
 	"github.com/o-guardiao/deposito/internal/domain"
 )
 
@@ -15,13 +16,33 @@ const flashCookie = "fisio_flash"
 
 func isHX(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
 
+// pageMeta is the title and navigation section of each full page.
+type pageMeta struct{ Title, Section string }
+
+var pages = map[string]pageMeta{
+	"agenda_day":       {"Agenda", "agenda"},
+	"agenda_week":      {"Agenda", "agenda"},
+	"appointment_form": {"Agenda", "agenda"},
+	"patient_list":     {"Pacientes", "pacientes"},
+	"patient_form":     {"Pacientes", "pacientes"},
+	"patient_record":   {"Pacientes", "pacientes"},
+	"connect":          {"Conectar", "agenda"},
+	"error":            {"Fisio", "agenda"},
+}
+
 // render writes a full page, or just the partial when the request came from htmx.
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page, partial string, data any) {
 	var err error
 	if partial != "" && isHX(r) {
 		err = s.views.Partial(w, status, partial, data)
 	} else {
-		lay := Layout{Title: pageTitle(page), Section: sectionOf(page), Demo: s.opts.Demo, Data: data}
+		meta, ok := pages[page]
+		if !ok {
+			s.log.Error("render", "page", page, "err", "página sem metadados")
+			http.Error(w, "erro ao montar a página", http.StatusInternalServerError)
+			return
+		}
+		lay := Layout{Title: meta.Title, Section: meta.Section, Demo: s.opts.Demo, Data: data}
 		lay.Flash = s.popFlash(w, r)
 		err = s.views.Page(w, status, page, lay)
 	}
@@ -31,34 +52,43 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 	}
 }
 
-func pageTitle(page string) string {
-	switch {
-	case strings.HasPrefix(page, "agenda"):
-		return "Agenda"
-	case strings.HasPrefix(page, "patient"):
-		return "Pacientes"
-	case page == "connect":
-		return "Conectar"
-	default:
-		return "Fisio"
+// notify asks the browser to show a toast after the swap. The modal, if
+// open, is closed only after the swap (HX-Trigger-After-Swap), because
+// closing it earlier would detach the form htmx is about to swap from.
+func (s *Server) notify(w http.ResponseWriter, msg string) {
+	w.Header().Set("HX-Trigger", asciiJSON(map[string]string{"toast": msg}))
+	w.Header().Set("HX-Trigger-After-Swap", `{"closeModal":true}`)
+}
+
+// asciiJSON encodes v as JSON with every non-ASCII rune escaped, because HTTP
+// headers are read as Latin-1 by browsers and would garble UTF-8.
+func asciiJSON(v any) string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "{}"
 	}
-}
-
-func sectionOf(page string) string {
-	if strings.HasPrefix(page, "patient") {
-		return "pacientes"
+	var b strings.Builder
+	for len(raw) > 0 {
+		r, size := utf8.DecodeRune(raw)
+		if r < utf8.RuneSelf {
+			b.WriteByte(raw[0])
+		} else {
+			for _, u := range utf16Encode(r) {
+				b.WriteString(`\u`)
+				b.WriteString(strconv.FormatUint(uint64(u), 16))
+			}
+		}
+		raw = raw[size:]
 	}
-	return "agenda"
+	return b.String()
 }
 
-// toast asks the browser to show a message after an htmx swap.
-func toast(w http.ResponseWriter, msg string) {
-	w.Header().Set("HX-Trigger", `{"toast":`+jsonString(msg)+`,"closeModal":true}`)
-}
-
-func jsonString(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
-	return `"` + r.Replace(s) + `"`
+func utf16Encode(r rune) []uint16 {
+	if r < 0x10000 {
+		return []uint16{uint16(r)}
+	}
+	r -= 0x10000
+	return []uint16{uint16(0xD800 + (r >> 10)), uint16(0xDC00 + (r & 0x3FF))}
 }
 
 // redirectWithFlash sends the browser to a new page and queues a toast.
@@ -84,15 +114,21 @@ func (s *Server) popFlash(w http.ResponseWriter, r *http.Request) string {
 	return v
 }
 
-// fail maps domain errors to status codes and renders the error page.
+// fail maps errors to status codes and renders the error page. When Google
+// says the saved credentials are no longer valid, the services are dropped so
+// the connect screen comes back instead of an endless 500.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	status := http.StatusInternalServerError
 	msg := "Algo deu errado. Tente novamente."
 	switch {
 	case domain.IsNotFound(err):
 		status, msg = http.StatusNotFound, "Não encontramos o que você procurava."
-	case errors.Is(err, app.ErrMirror):
-		status, msg = http.StatusBadGateway, err.Error()
+	case s.opts.Login != nil && s.opts.Login.NeedsReconnect(err):
+		s.log.Warn("credenciais recusadas; pedindo novo login", "err", err)
+		s.opts.Login.Forget()
+		s.services.Store(nil)
+		s.redirectWithFlash(w, r, "/", "O Google pediu um novo login")
+		return
 	}
 	if status >= 500 {
 		s.log.Error("request failed", "path", r.URL.Path, "err", err)
@@ -102,15 +138,24 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 
 // Form helpers -------------------------------------------------------------
 
+// localPath accepts only same-site paths for "voltar" redirects.
+func localPath(v string) string {
+	if strings.HasPrefix(v, "/") && !strings.HasPrefix(v, "//") && !strings.ContainsAny(v, "\\\r\n") {
+		return v
+	}
+	return ""
+}
+
+func (s *Server) now() time.Time { return s.clock.Now().In(s.opts.Location) }
+
 func (s *Server) parseDateParam(r *http.Request, name string) time.Time {
-	now := time.Now().In(s.opts.Location)
 	v := r.URL.Query().Get(name)
 	if v == "" {
-		return now
+		return s.now()
 	}
 	t, err := time.ParseInLocation("2006-01-02", v, s.opts.Location)
 	if err != nil {
-		return now
+		return s.now()
 	}
 	return t
 }
@@ -134,27 +179,24 @@ func (s *Server) parseDate(v string) time.Time {
 }
 
 func parseMinutes(v string, def time.Duration) time.Duration {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return def
-	}
-	var n int
-	for _, c := range v {
-		if c < '0' || c > '9' {
-			return def
-		}
-		n = n*10 + int(c-'0')
-	}
-	if n <= 0 || n > 24*60 {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n <= 0 || n > 24*60 {
 		return def
 	}
 	return time.Duration(n) * time.Minute
 }
 
-// fieldErrors extracts per-field messages or a general one.
+// mondayOf returns the Monday 00:00 of the week containing t.
+func mondayOf(t time.Time, loc *time.Location) time.Time {
+	d := domain.StartOfDay(t, loc)
+	offset := (int(d.Weekday()) + 6) % 7
+	return time.Date(d.Year(), d.Month(), d.Day()-offset, 0, 0, 0, 0, loc)
+}
+
+// fieldErrors extracts per-field messages from a validation error.
 func fieldErrors(err error) map[string]string {
 	if ve, ok := domain.AsValidation(err); ok {
 		return ve.Fields
 	}
-	return map[string]string{"_": err.Error()}
+	return nil
 }

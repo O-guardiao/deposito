@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"sort"
 	"time"
 
 	"google.golang.org/api/calendar/v3"
@@ -28,6 +30,10 @@ type Agenda struct {
 	calendarID string
 	loc        *time.Location
 	reminders  ReminderPolicy
+	// Logger receives one warning per event the API returned but the adapter
+	// could not interpret; such events are skipped instead of hiding the
+	// whole day. Defaults to slog.Default().
+	Logger *slog.Logger
 }
 
 // NewAgenda creates the adapter. calendarID is usually "primary".
@@ -35,10 +41,12 @@ func NewAgenda(api EventsAPI, calendarID string, loc *time.Location, rem Reminde
 	if loc == nil {
 		loc = time.UTC
 	}
-	return &Agenda{api: api, calendarID: calendarID, loc: loc, reminders: rem}
+	return &Agenda{api: api, calendarID: calendarID, loc: loc, reminders: rem, Logger: slog.Default()}
 }
 
-// ListBetween implements domain.Agenda.
+// ListBetween implements domain.Agenda: appointments whose Start lies in
+// [from, to). Google's timeMin/timeMax select by overlap, so the result is
+// filtered again here to honour the port's contract.
 func (g *Agenda) ListBetween(ctx context.Context, from, to time.Time) ([]domain.Appointment, error) {
 	evs, err := g.api.List(ctx, g.calendarID, from, to)
 	if err != nil {
@@ -51,10 +59,15 @@ func (g *Agenda) ListBetween(ctx context.Context, from, to time.Time) ([]domain.
 		}
 		a, err := eventToAppointment(ev, g.loc)
 		if err != nil {
-			return nil, fmt.Errorf("evento %s: %w", ev.Id, err)
+			g.Logger.Warn("evento ignorado", "id", ev.Id, "err", err)
+			continue
+		}
+		if a.Start.Before(from) || !a.Start.Before(to) {
+			continue
 		}
 		out = append(out, a)
 	}
+	sortByStart(out)
 	return out, nil
 }
 
@@ -82,7 +95,7 @@ func (g *Agenda) Create(ctx context.Context, a domain.Appointment) (domain.Appoi
 // Update implements domain.Agenda. Reminders are only (re)applied to
 // app-managed fields; a patch keeps attendees and other data untouched.
 func (g *Agenda) Update(ctx context.Context, a domain.Appointment) error {
-	if _, err := g.api.Patch(ctx, g.calendarID, a.ID, appointmentToEvent(a, g.reminders)); err != nil {
+	if _, err := g.api.Patch(ctx, g.calendarID, a.ID, forPatch(appointmentToEvent(a, g.reminders))); err != nil {
 		return translate(a.ID, err)
 	}
 	return nil
@@ -94,6 +107,10 @@ func (g *Agenda) Delete(ctx context.Context, id string) error {
 		return translate(id, err)
 	}
 	return nil
+}
+
+func sortByStart(items []domain.Appointment) {
+	sort.SliceStable(items, func(i, j int) bool { return items[i].Start.Before(items[j].Start) })
 }
 
 func translate(id string, err error) error {

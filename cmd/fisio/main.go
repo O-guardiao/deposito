@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata"
@@ -24,6 +25,7 @@ import (
 	"github.com/o-guardiao/deposito/internal/adapters/gauth"
 	"github.com/o-guardiao/deposito/internal/adapters/gcalendar"
 	"github.com/o-guardiao/deposito/internal/adapters/gsheets"
+	"github.com/o-guardiao/deposito/internal/adapters/ids"
 	"github.com/o-guardiao/deposito/internal/adapters/memory"
 	"github.com/o-guardiao/deposito/internal/app"
 	"github.com/o-guardiao/deposito/internal/domain"
@@ -51,7 +53,7 @@ func envOr(key, def string) string {
 
 func parseConfig() config {
 	var c config
-	flag.StringVar(&c.addr, "addr", envOr("FISIO_ADDR", ":8080"), "endereço HTTP")
+	flag.StringVar(&c.addr, "addr", envOr("FISIO_ADDR", "127.0.0.1:8080"), "endereço HTTP (só a máquina dela; 0.0.0.0:8080 expõe na rede)")
 	flag.BoolVar(&c.demo, "demo", os.Getenv("FISIO_DEMO") == "1", "modo demo: dados em memória, sem Google")
 	flag.StringVar(&c.dataDir, "data", envOr("FISIO_DATA", "./data"), "pasta para token e configuração")
 	flag.StringVar(&c.credentials, "credentials", envOr("FISIO_CREDENTIALS", "./credentials.json"), "credentials.json do OAuth (Google Cloud)")
@@ -71,6 +73,7 @@ func parseConfig() config {
 		}
 		c.publicURL = "http://localhost:" + port
 	}
+	c.publicURL = strings.TrimRight(c.publicURL, "/")
 	return c
 }
 
@@ -109,16 +112,16 @@ func main() {
 	clock := domain.ClockFunc(time.Now)
 
 	var (
-		services *web.Services
-		opts     = web.Options{Location: loc, Demo: cfg.demo, Logger: log}
+		services *app.Services
+		opts     = web.Options{Location: loc, Clock: clock, Demo: cfg.demo, Logger: log}
 	)
 	if cfg.demo {
 		store := memory.NewStore()
 		store.SeedDemo(clock.Now(), loc)
-		services = buildServices(store.Patients, store.Evolutions, store.Agenda, store.Mirror, store.IDs, clock, loc)
+		services = app.NewServices(app.Deps{Patients: store.Patients, Evolutions: store.Evolutions, Agenda: store.Agenda, Mirror: store.Mirror, IDs: store.IDs, Clock: clock, Location: loc})
 		log.Warn("MODO DEMO: dados fictícios em memória; nada é gravado no Google")
 	} else {
-		auth, err := gauth.New(cfg.credentials, cfg.tokenPath, cfg.publicURL+"/auth/callback")
+		auth, err := gauth.New(gauth.Config{CredentialsPath: cfg.credentials, TokenPath: cfg.tokenPath, RedirectURL: cfg.publicURL + "/auth/callback"})
 		if err != nil {
 			log.Error("não foi possível carregar as credenciais do Google", "err", err,
 				"dica", "crie um OAuth client no Google Cloud e salve como credentials.json (veja README)")
@@ -142,7 +145,11 @@ func main() {
 		log.Error("iniciar servidor", "err", err)
 		os.Exit(1)
 	}
-	httpServer := &http.Server{Addr: cfg.addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	httpServer := &http.Server{
+		Addr: cfg.addr, Handler: srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+		WriteTimeout: 120 * time.Second, IdleTimeout: 2 * time.Minute,
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -160,21 +167,14 @@ func main() {
 	log.Info("até logo")
 }
 
-func buildServices(p domain.PatientRepository, e domain.EvolutionRepository, a domain.Agenda, m domain.AppointmentMirror, ids domain.IDGenerator, clock domain.Clock, loc *time.Location) *web.Services {
-	return &web.Services{
-		Patients:   app.NewPatientService(p, e, a, ids, clock),
-		Evolutions: app.NewEvolutionService(e, p, ids, clock),
-		Agenda:     app.NewAgendaService(a, m, p, clock, loc),
-		Sync:       app.NewSyncService(a, m, clock),
-	}
-}
-
 // googleFactory builds the Google-backed services once a token exists,
-// creating the spreadsheet on first use and remembering its ID.
+// creating the spreadsheet on first use and remembering its ID. ctx bounds
+// the setup calls only: the HTTP client refreshes tokens under the
+// Authenticator's own lifetime context.
 func googleFactory(cfg config, auth *gauth.Authenticator, clock domain.Clock, loc *time.Location, log *slog.Logger) web.ServicesFactory {
 	settingsPath := filepath.Join(cfg.dataDir, "fisio.json")
-	return func(ctx context.Context) (*web.Services, error) {
-		client, err := auth.Client(ctx)
+	return func(ctx context.Context) (*app.Services, error) {
+		client, err := auth.Client()
 		if err != nil {
 			return nil, err
 		}
@@ -193,7 +193,7 @@ func googleFactory(cfg config, auth *gauth.Authenticator, clock domain.Clock, lo
 		if id == "" {
 			id = st.SpreadsheetID
 		}
-		id, err = gsheets.Bootstrap(ctx, sheetsAPI, id)
+		id, err = gsheets.EnsureSpreadsheet(ctx, sheetsAPI, id, loc)
 		if err != nil {
 			return nil, err
 		}
@@ -204,13 +204,14 @@ func googleFactory(cfg config, auth *gauth.Authenticator, clock domain.Clock, lo
 			log.Info("planilha pronta", "url", "https://docs.google.com/spreadsheets/d/"+id)
 		}
 		agenda := gcalendar.NewAgenda(gcalendar.NewServiceAPI(calSvc), cfg.calendarID, loc, gcalendar.DefaultReminders())
-		return buildServices(
-			gsheets.NewPatientRepo(sheetsAPI, id, loc),
-			gsheets.NewEvolutionRepo(sheetsAPI, id, loc),
-			agenda,
-			gsheets.NewMirror(sheetsAPI, id),
-			gsheets.RandomIDs{},
-			clock, loc,
-		), nil
+		agenda.Logger = log
+		return app.NewServices(app.Deps{
+			Patients:   gsheets.NewPatientRepo(sheetsAPI, id, loc),
+			Evolutions: gsheets.NewEvolutionRepo(sheetsAPI, id, loc),
+			Agenda:     agenda,
+			Mirror:     gsheets.NewMirror(sheetsAPI, id),
+			IDs:        ids.Random{Clock: clock},
+			Clock:      clock, Location: loc,
+		}), nil
 	}
 }

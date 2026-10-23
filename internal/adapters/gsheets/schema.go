@@ -67,7 +67,7 @@ func parseDate(s string, loc *time.Location) time.Time {
 	if s == "" {
 		return time.Time{}
 	}
-	for _, layout := range []string{dateLayout, "02/01/2006", tsLayout} {
+	for _, layout := range []string{dateLayout, "02/01/2006", "02/01/2006 15:04:05", "02/01/2006 15:04", "2006-01-02 15:04:05", tsLayout} {
 		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
 			return t
 		}
@@ -116,7 +116,14 @@ func rowToAppointment(row []string, loc *time.Location) domain.Appointment {
 	return domain.Appointment{
 		ID: cell(row, 0), PatientID: cell(row, 1), Title: cell(row, 2),
 		Start: parseTS(cell(row, 3), loc), End: parseTS(cell(row, 4), loc),
-		Status: domain.ParseStatus(cell(row, 5)), Notes: cell(row, 6), Location: cell(row, 7),
+		Status: statusOrScheduled(cell(row, 5)), Notes: cell(row, 6), Location: cell(row, 7),
 		UpdatedAt: parseTS(cell(row, 8), loc),
 	}
+}
+
+// statusOrScheduled is lenient on purpose: a typo in the Status cell must
+// not hide the row; it is shown as scheduled.
+func statusOrScheduled(s string) domain.AppointmentStatus {
+	st, _ := domain.ParseStatus(s)
+	return st
 }

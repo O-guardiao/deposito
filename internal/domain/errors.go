@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -14,15 +15,24 @@ type ValidationError struct {
 	Fields map[string]string
 }
 
+// NewValidationError returns an empty, ready-to-use error.
+func NewValidationError() *ValidationError { return &ValidationError{Fields: map[string]string{}} }
+
 func (e *ValidationError) Error() string {
-	parts := make([]string, 0, len(e.Fields))
-	for k, v := range e.Fields {
-		parts = append(parts, fmt.Sprintf("%s: %s", k, v))
+	keys := make([]string, 0, len(e.Fields))
+	for k := range e.Fields {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s: %s", k, e.Fields[k]))
 	}
 	return "validação: " + strings.Join(parts, "; ")
 }
 
-// Add records a problem for a field. A nil receiver is allocated lazily.
+// Add records a problem for a field. The receiver must be non-nil; the
+// Fields map is allocated lazily so a zero ValidationError is usable.
 func (e *ValidationError) Add(field, msg string) {
 	if e.Fields == nil {
 		e.Fields = map[string]string{}

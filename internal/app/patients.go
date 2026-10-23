@@ -36,17 +36,15 @@ type PatientService struct {
 	agenda     domain.Agenda
 	ids        domain.IDGenerator
 	clock      domain.Clock
-	// HistoryWindow bounds how far back/forward the record looks for appointments.
-	HistoryWindow time.Duration
-	FutureWindow  time.Duration
+	// Window bounds how far back/forward the record looks for appointments.
+	Window Window
 }
 
 // NewPatientService wires the dependencies.
 func NewPatientService(p domain.PatientRepository, e domain.EvolutionRepository, a domain.Agenda, ids domain.IDGenerator, c domain.Clock) *PatientService {
 	return &PatientService{
 		patients: p, evolutions: e, agenda: a, ids: ids, clock: c,
-		HistoryWindow: 365 * 24 * time.Hour,
-		FutureWindow:  180 * 24 * time.Hour,
+		Window: Window{Behind: 365 * 24 * time.Hour, Ahead: 180 * 24 * time.Hour},
 	}
 }
 
@@ -57,7 +55,7 @@ func (s *PatientService) Create(ctx context.Context, in PatientInput) (domain.Pa
 		ID:        s.ids.NewPatientID(),
 		CreatedAt: now,
 	}
-	applyPatientInput(&p, in, now)
+	in.Apply(&p, now)
 	if err := p.Validate(); err != nil {
 		return domain.Patient{}, err
 	}
@@ -73,7 +71,7 @@ func (s *PatientService) Update(ctx context.Context, id string, in PatientInput)
 	if err != nil {
 		return domain.Patient{}, err
 	}
-	applyPatientInput(&p, in, s.clock.Now())
+	in.Apply(&p, s.clock.Now())
 	if err := p.Validate(); err != nil {
 		return domain.Patient{}, err
 	}
@@ -83,7 +81,9 @@ func (s *PatientService) Update(ctx context.Context, id string, in PatientInput)
 	return p, nil
 }
 
-func applyPatientInput(p *domain.Patient, in PatientInput, now time.Time) {
+// Apply copies the (trimmed) input onto an existing patient, keeping its ID
+// and creation time. The delivery layer reuses it to re-render invalid forms.
+func (in PatientInput) Apply(p *domain.Patient, now time.Time) {
 	p.Name = strings.TrimSpace(in.Name)
 	p.Phone = strings.TrimSpace(in.Phone)
 	p.Address = strings.TrimSpace(in.Address)
@@ -110,16 +110,22 @@ func (s *PatientService) List(ctx context.Context) ([]domain.Patient, error) {
 
 // Search filters patients by name or phone; an empty query lists everyone.
 func (s *PatientService) Search(ctx context.Context, query string) ([]domain.Patient, error) {
-	items, err := s.patients.Search(ctx, query)
+	all, err := s.patients.List(ctx)
 	if err != nil {
 		return nil, err
+	}
+	items := all[:0]
+	for _, p := range all {
+		if p.MatchesQuery(query) {
+			items = append(items, p)
+		}
 	}
 	sortPatients(items)
 	return items, nil
 }
 
-// Record assembles the full ficha for a patient.
-func (s *PatientService) Record(ctx context.Context, id string) (PatientRecord, error) {
+// GetRecord assembles the full ficha for a patient.
+func (s *PatientService) GetRecord(ctx context.Context, id string) (PatientRecord, error) {
 	p, err := s.patients.Get(ctx, id)
 	if err != nil {
 		return PatientRecord{}, err
@@ -131,7 +137,7 @@ func (s *PatientService) Record(ctx context.Context, id string) (PatientRecord, 
 	sort.Slice(evs, func(i, j int) bool { return evs[i].Date.After(evs[j].Date) })
 
 	now := s.clock.Now()
-	all, err := s.agenda.ListBetween(ctx, now.Add(-s.HistoryWindow), now.Add(s.FutureWindow))
+	all, err := s.agenda.ListBetween(ctx, now.Add(-s.Window.Behind), now.Add(s.Window.Ahead))
 	if err != nil {
 		return PatientRecord{}, fmt.Errorf("listar agenda: %w", err)
 	}

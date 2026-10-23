@@ -1,12 +1,17 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"time"
 )
 
 const stateCookie = "fisio_oauth_state"
+
+// setupTimeout bounds the spreadsheet bootstrap after login.
+const setupTimeout = 60 * time.Second
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Login == nil {
@@ -43,7 +48,11 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, http.StatusBadGateway, "connect", "", map[string]any{"Error": "Não foi possível concluir o login. Tente novamente."})
 		return
 	}
-	if err := s.ConnectServices(r); err != nil {
+	// The setup creates the spreadsheet on first run; it must not be cut
+	// short because the browser closed the connection, or the ID is lost.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), setupTimeout)
+	defer cancel()
+	if err := s.ConnectServices(ctx); err != nil {
 		s.log.Error("connect services", "err", err)
 		s.render(w, r, http.StatusBadGateway, "connect", "", map[string]any{"Error": "Login feito, mas a planilha/agenda não pôde ser preparada: " + err.Error()})
 		return
@@ -51,12 +60,13 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	s.redirectWithFlash(w, r, "/agenda", "Conta Google conectada")
 }
 
-// ConnectServices builds the use cases through the factory and activates them.
-func (s *Server) ConnectServices(r *http.Request) error {
+// ConnectServices builds the use cases through the factory and activates
+// them. ctx bounds the setup only; see ServicesFactory.
+func (s *Server) ConnectServices(ctx context.Context) error {
 	if s.opts.Factory == nil {
 		return nil
 	}
-	svc, err := s.opts.Factory(r.Context())
+	svc, err := s.opts.Factory(ctx)
 	if err != nil {
 		return err
 	}

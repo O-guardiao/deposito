@@ -15,39 +15,61 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/sheets/v4"
 )
 
-// Scopes requested from Google: calendar read/write, spreadsheets read/write
-// and creation of files owned by the app.
-var Scopes = []string{calendar.CalendarScope, sheets.SpreadsheetsScope, "https://www.googleapis.com/auth/drive.file"}
+// Scopes requested from Google: calendar read/write and spreadsheets
+// read/write. Sheets has no narrower scope that still allows creating the
+// spreadsheet on first run.
+var Scopes = []string{calendar.CalendarScope, sheets.SpreadsheetsScope}
 
 // ErrNotConnected is returned before the user completes the login.
 var ErrNotConnected = errors.New("conta Google não conectada")
+
+// Config tells the Authenticator where its files are and where Google must
+// send the browser back.
+type Config struct {
+	CredentialsPath string // credentials.json from Google Cloud (Desktop or Web client)
+	TokenPath       string // where the token is persisted (0600)
+	RedirectURL     string // must be registered in Google Cloud
+	// Context bounds the lifetime of the clients handed out by Client: token
+	// refreshes run under it. Defaults to context.Background(), i.e. the
+	// process lifetime. Never pass a request context here.
+	Context context.Context
+}
 
 // Authenticator runs the login flow and hands out authenticated HTTP clients.
 type Authenticator struct {
 	cfg       *oauth2.Config
 	tokenPath string
+	baseCtx   context.Context
 	mu        sync.Mutex
 	token     *oauth2.Token
 }
 
-// New loads the OAuth client from credentials.json (Desktop or Web type) and
-// any previously saved token. redirectURL must be registered in Google Cloud.
-func New(credentialsPath, tokenPath, redirectURL string) (*Authenticator, error) {
-	raw, err := os.ReadFile(credentialsPath)
+// New loads the OAuth client from credentials.json and any previously saved token.
+func New(c Config) (*Authenticator, error) {
+	raw, err := os.ReadFile(c.CredentialsPath)
 	if err != nil {
-		return nil, fmt.Errorf("ler credenciais %s: %w", credentialsPath, err)
+		return nil, fmt.Errorf("ler credenciais %s: %w", c.CredentialsPath, err)
 	}
 	cfg, err := google.ConfigFromJSON(raw, Scopes...)
 	if err != nil {
 		return nil, fmt.Errorf("credenciais inválidas: %w", err)
 	}
-	cfg.RedirectURL = redirectURL
-	a := &Authenticator{cfg: cfg, tokenPath: tokenPath}
+	cfg.RedirectURL = c.RedirectURL
+	return newWithOAuth(cfg, c.TokenPath, c.Context), nil
+}
+
+// newWithOAuth is the constructor tests use to point at a fake token endpoint.
+func newWithOAuth(cfg *oauth2.Config, tokenPath string, base context.Context) *Authenticator {
+	if base == nil {
+		base = context.Background()
+	}
+	a := &Authenticator{cfg: cfg, tokenPath: tokenPath, baseCtx: base}
 	a.token, _ = loadToken(tokenPath) // absent token simply means "not connected yet"
-	return a, nil
+	return a
 }
 
 // Connected reports whether a token is available.
@@ -74,17 +96,38 @@ func (a *Authenticator) Exchange(ctx context.Context, code string) error {
 	return saveToken(a.tokenPath, tok)
 }
 
-// Client returns an HTTP client that refreshes the token automatically and
-// persists refreshed tokens.
-func (a *Authenticator) Client(ctx context.Context) (*http.Client, error) {
+// Client returns a long-lived HTTP client that refreshes the token
+// automatically (under the Authenticator's base context, not the caller's)
+// and persists refreshed tokens.
+func (a *Authenticator) Client() (*http.Client, error) {
 	a.mu.Lock()
 	tok := a.token
 	a.mu.Unlock()
 	if tok == nil {
 		return nil, ErrNotConnected
 	}
-	src := &persistingSource{auth: a, src: a.cfg.TokenSource(ctx, tok)}
-	return oauth2.NewClient(ctx, src), nil
+	src := &persistingSource{auth: a, src: a.cfg.TokenSource(a.baseCtx, tok)}
+	return oauth2.NewClient(a.baseCtx, src), nil
+}
+
+// NeedsReconnect reports whether err means Google no longer accepts the saved
+// token (revoked, expired refresh token, invalid_grant): the user must log in
+// again. Forget drops the token so the connect screen comes back.
+func (a *Authenticator) NeedsReconnect(err error) bool {
+	var re *oauth2.RetrieveError
+	if errors.As(err, &re) {
+		return re.Response == nil || re.Response.StatusCode == http.StatusBadRequest || re.Response.StatusCode == http.StatusUnauthorized
+	}
+	var ge *googleapi.Error
+	return errors.As(err, &ge) && ge.Code == http.StatusUnauthorized
+}
+
+// Forget discards the saved token (memory and disk).
+func (a *Authenticator) Forget() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.token = nil
+	_ = os.Remove(a.tokenPath)
 }
 
 // persistingSource writes refreshed tokens back to disk.

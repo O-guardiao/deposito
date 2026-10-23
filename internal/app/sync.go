@@ -13,21 +13,20 @@ type SyncService struct {
 	agenda domain.Agenda
 	mirror domain.AppointmentMirror
 	clock  domain.Clock
-	// Past and Future bound the reconciliation window around now.
-	Past   time.Duration
-	Future time.Duration
+	// Window bounds the reconciliation around now.
+	Window Window
 }
 
 // NewSyncService wires the dependencies.
 func NewSyncService(a domain.Agenda, m domain.AppointmentMirror, c domain.Clock) *SyncService {
-	return &SyncService{agenda: a, mirror: m, clock: c, Past: 90 * 24 * time.Hour, Future: 180 * 24 * time.Hour}
+	return &SyncService{agenda: a, mirror: m, clock: c, Window: Window{Behind: 90 * 24 * time.Hour, Ahead: 180 * 24 * time.Hour}}
 }
 
-// Reconcile replaces the mirror contents with the linked agenda entries in the
-// window and returns how many were copied.
+// Reconcile rewrites the mirror from the linked agenda entries in the window
+// (cancelled rows are kept by the mirror) and returns how many were copied.
 func (s *SyncService) Reconcile(ctx context.Context) (int, error) {
 	now := s.clock.Now()
-	items, err := s.agenda.ListBetween(ctx, now.Add(-s.Past), now.Add(s.Future))
+	items, err := s.agenda.ListBetween(ctx, now.Add(-s.Window.Behind), now.Add(s.Window.Ahead))
 	if err != nil {
 		return 0, fmt.Errorf("listar agenda: %w", err)
 	}
@@ -37,7 +36,7 @@ func (s *SyncService) Reconcile(ctx context.Context) (int, error) {
 			linked = append(linked, a)
 		}
 	}
-	if err := s.mirror.ReplaceAll(ctx, linked); err != nil {
+	if err := s.mirror.Reconcile(ctx, linked); err != nil {
 		return 0, fmt.Errorf("gravar planilha: %w", err)
 	}
 	return len(linked), nil

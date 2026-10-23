@@ -1,12 +1,19 @@
 package web
 
 import (
-	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/o-guardiao/deposito/internal/app"
 	"github.com/o-guardiao/deposito/internal/domain"
+)
+
+// Views the appointment form can be opened from; the answer to a save is
+// rendered for the same view.
+const (
+	viewDay  = "dia"
+	viewWeek = "semana"
 )
 
 // agendaDayData feeds the day view (page and partial).
@@ -19,8 +26,9 @@ type agendaDayData struct {
 
 // agendaWeekData feeds the week view.
 type agendaWeekData struct {
-	Days []app.DayView
-	Now  time.Time
+	Days   []app.DayView
+	Now    time.Time
+	Notice string
 }
 
 // appointmentFormData feeds the create/edit form.
@@ -30,7 +38,11 @@ type appointmentFormData struct {
 	Minutes     int
 	Errors      map[string]string
 	Return      string // where to go after saving, when opened from a patient record
+	View        string // viewDay or viewWeek: which agenda view to refresh after saving
 	IsEdit      bool
+	// Modal is true when the form is rendered inside the modal (htmx); the
+	// full page version submits as a plain form and must carry no hx-target.
+	Modal bool
 }
 
 func (s *Server) dayData(r *http.Request, date time.Time, notice string) (agendaDayData, error) {
@@ -42,7 +54,15 @@ func (s *Server) dayData(r *http.Request, date time.Time, notice string) (agenda
 	if err != nil {
 		return agendaDayData{}, err
 	}
-	return agendaDayData{Day: day, Now: time.Now(), Patients: patients, Notice: notice}, nil
+	return agendaDayData{Day: day, Now: s.now(), Patients: patients, Notice: notice}, nil
+}
+
+func (s *Server) weekData(r *http.Request, start time.Time, notice string) (agendaWeekData, error) {
+	days, err := s.svc().Agenda.Week(r.Context(), start)
+	if err != nil {
+		return agendaWeekData{}, err
+	}
+	return agendaWeekData{Days: days, Now: s.now(), Notice: notice}, nil
 }
 
 func (s *Server) handleAgendaDay(w http.ResponseWriter, r *http.Request) {
@@ -57,16 +77,23 @@ func (s *Server) handleAgendaDay(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAgendaWeek(w http.ResponseWriter, r *http.Request) {
 	start := s.parseDateParam(r, "inicio")
 	if r.URL.Query().Get("inicio") == "" {
-		// Default to the Monday of the current week.
-		offset := (int(start.Weekday()) + 6) % 7
-		start = start.AddDate(0, 0, -offset)
+		start = mondayOf(start, s.opts.Location)
 	}
-	days, err := s.svc().Agenda.Week(r.Context(), start)
+	data, err := s.weekData(r, start, "")
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	s.render(w, r, http.StatusOK, "agenda_week", "agenda-week", agendaWeekData{Days: days, Now: time.Now()})
+	s.render(w, r, http.StatusOK, "agenda_week", "agenda-week", data)
+}
+
+func (s *Server) defaultMinutes() int { return int(s.svc().Agenda.DefaultDuration.Minutes()) }
+
+func viewOf(v string) string {
+	if v == viewWeek {
+		return viewWeek
+	}
+	return viewDay
 }
 
 func (s *Server) handleAppointmentNew(w http.ResponseWriter, r *http.Request) {
@@ -75,15 +102,17 @@ func (s *Server) handleAppointmentNew(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	q := r.URL.Query()
 	date := s.parseDateParam(r, "data")
 	start := time.Date(date.Year(), date.Month(), date.Day(), 9, 0, 0, 0, s.opts.Location)
-	if date.Hour() != 0 { // "today" default: next full hour
-		n := time.Now().In(s.opts.Location)
+	if q.Get("data") == "" || domain.SameDay(date, s.now(), s.opts.Location) {
+		n := s.now()
 		start = time.Date(n.Year(), n.Month(), n.Day(), n.Hour()+1, 0, 0, 0, s.opts.Location)
 	}
 	data := appointmentFormData{
-		Appointment: domain.Appointment{PatientID: r.URL.Query().Get("paciente"), Start: start},
-		Patients:    patients, Minutes: 60, Return: r.URL.Query().Get("voltar"),
+		Appointment: domain.Appointment{PatientID: q.Get("paciente"), Start: start},
+		Patients:    patients, Minutes: s.defaultMinutes(),
+		Return: localPath(q.Get("voltar")), View: viewOf(q.Get("vista")), Modal: isHX(r),
 	}
 	s.render(w, r, http.StatusOK, "appointment_form", "appointment-form", data)
 }
@@ -96,11 +125,11 @@ func (s *Server) handleAppointmentCreate(w http.ResponseWriter, r *http.Request)
 	in := app.ScheduleInput{
 		PatientID: r.PostForm.Get("paciente"),
 		Start:     s.parseLocalDateTime(r.PostForm.Get("inicio")),
-		Duration:  parseMinutes(r.PostForm.Get("duracao"), time.Hour),
+		Duration:  parseMinutes(r.PostForm.Get("duracao"), s.svc().Agenda.DefaultDuration),
 		Notes:     r.PostForm.Get("observacoes"),
 	}
-	a, err := s.svc().Agenda.Schedule(r.Context(), in)
-	if err != nil && !errors.Is(err, app.ErrMirror) {
+	res, err := s.svc().Agenda.Schedule(r.Context(), in)
+	if err != nil {
 		if _, ok := domain.AsValidation(err); !ok {
 			s.fail(w, r, err)
 			return
@@ -109,12 +138,12 @@ func (s *Server) handleAppointmentCreate(w http.ResponseWriter, r *http.Request)
 		data := appointmentFormData{
 			Appointment: domain.Appointment{PatientID: in.PatientID, Start: in.Start, Notes: in.Notes},
 			Patients:    patients, Minutes: int(in.Duration.Minutes()), Errors: fieldErrors(err),
-			Return: r.PostForm.Get("voltar"),
+			Return: localPath(r.PostForm.Get("voltar")), View: viewOf(r.PostForm.Get("vista")), Modal: isHX(r),
 		}
-		s.renderForm(w, r, "appointment_form", "appointment-form", data)
+		s.renderForm(w, r, data)
 		return
 	}
-	s.afterAppointmentWrite(w, r, a, err, "Agendado para "+a.Start.In(s.opts.Location).Format("02/01 às 15:04"), r.PostForm.Get("voltar"))
+	s.afterAppointmentWrite(w, r, res, "Agendado para "+res.Appointment.Start.In(s.opts.Location).Format("02/01 às 15:04"))
 }
 
 func (s *Server) handleAppointmentEdit(w http.ResponseWriter, r *http.Request) {
@@ -130,9 +159,11 @@ func (s *Server) handleAppointmentEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	mins := int(a.Duration().Minutes())
 	if mins <= 0 {
-		mins = 60
+		mins = s.defaultMinutes()
 	}
-	data := appointmentFormData{Appointment: a, Patients: patients, Minutes: mins, IsEdit: true, Return: r.URL.Query().Get("voltar")}
+	q := r.URL.Query()
+	data := appointmentFormData{Appointment: a, Patients: patients, Minutes: mins, IsEdit: true,
+		Return: localPath(q.Get("voltar")), View: viewOf(q.Get("vista")), Modal: isHX(r)}
 	s.render(w, r, http.StatusOK, "appointment_form", "appointment-form", data)
 }
 
@@ -147,8 +178,8 @@ func (s *Server) handleAppointmentUpdate(w http.ResponseWriter, r *http.Request)
 		Duration: parseMinutes(r.PostForm.Get("duracao"), 0),
 		Notes:    r.PostForm.Get("observacoes"),
 	}
-	a, err := s.svc().Agenda.Reschedule(r.Context(), id, in)
-	if err != nil && !errors.Is(err, app.ErrMirror) {
+	res, err := s.svc().Agenda.Reschedule(r.Context(), id, in)
+	if err != nil {
 		if _, ok := domain.AsValidation(err); !ok {
 			s.fail(w, r, err)
 			return
@@ -160,55 +191,58 @@ func (s *Server) handleAppointmentUpdate(w http.ResponseWriter, r *http.Request)
 		}
 		cur.Start, cur.Notes = in.Start, in.Notes
 		patients, _ := s.svc().Patients.List(r.Context())
-		data := appointmentFormData{Appointment: cur, Patients: patients, Minutes: int(in.Duration.Minutes()), Errors: fieldErrors(err), IsEdit: true, Return: r.PostForm.Get("voltar")}
-		s.renderForm(w, r, "appointment_form", "appointment-form", data)
+		data := appointmentFormData{Appointment: cur, Patients: patients, Minutes: int(in.Duration.Minutes()), Errors: fieldErrors(err), IsEdit: true,
+			Return: localPath(r.PostForm.Get("voltar")), View: viewOf(r.PostForm.Get("vista")), Modal: isHX(r)}
+		s.renderForm(w, r, data)
 		return
 	}
-	s.afterAppointmentWrite(w, r, a, err, "Remarcado para "+a.Start.In(s.opts.Location).Format("02/01 às 15:04"), r.PostForm.Get("voltar"))
+	s.afterAppointmentWrite(w, r, res, "Remarcado para "+res.Appointment.Start.In(s.opts.Location).Format("02/01 às 15:04"))
 }
 
 func (s *Server) handleAppointmentCancel(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	a, err := s.svc().Agenda.Get(r.Context(), id)
+	res, err := s.svc().Agenda.Cancel(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	err = s.svc().Agenda.Cancel(r.Context(), id)
-	if err != nil && !errors.Is(err, app.ErrMirror) {
-		s.fail(w, r, err)
-		return
-	}
-	s.afterAppointmentWrite(w, r, a, err, "Atendimento cancelado", r.FormValue("voltar"))
+	s.afterAppointmentWrite(w, r, res, "Atendimento cancelado")
 }
 
 func (s *Server) handleAppointmentDone(w http.ResponseWriter, r *http.Request) {
-	a, err := s.svc().Agenda.MarkDone(r.Context(), r.PathValue("id"))
-	if err != nil && !errors.Is(err, app.ErrMirror) {
+	res, err := s.svc().Agenda.MarkDone(r.Context(), r.PathValue("id"))
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	s.afterAppointmentWrite(w, r, a, err, "Atendimento concluído", r.FormValue("voltar"))
+	s.afterAppointmentWrite(w, r, res, "Atendimento concluído")
 }
 
 func (s *Server) handleAppointmentLink(w http.ResponseWriter, r *http.Request) {
-	a, err := s.svc().Agenda.Link(r.Context(), r.PathValue("id"), r.FormValue("paciente"))
-	if err != nil && !errors.Is(err, app.ErrMirror) {
+	res, err := s.svc().Agenda.Link(r.Context(), r.PathValue("id"), r.FormValue("paciente"))
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	s.afterAppointmentWrite(w, r, a, err, "Vinculado a "+a.Title, r.FormValue("voltar"))
+	s.afterAppointmentWrite(w, r, res, "Vinculado a "+res.Appointment.Title)
 }
 
-// afterAppointmentWrite responds to a successful (or mirror-warned) write:
-// htmx callers get the refreshed day view, others are redirected to it.
-func (s *Server) afterAppointmentWrite(w http.ResponseWriter, r *http.Request, a domain.Appointment, mirrorErr error, msg, back string) {
+// afterAppointmentWrite answers a successful write. Plain submits and
+// "voltar" callers are redirected; htmx callers receive the refreshed agenda
+// (day or week, matching the view the form came from) retargeted onto
+// #agenda-main, with the toast and the modal close queued after the swap.
+func (s *Server) afterAppointmentWrite(w http.ResponseWriter, r *http.Request, res app.WriteResult, msg string) {
+	a := res.Appointment
 	notice := ""
-	if mirrorErr != nil {
-		notice = mirrorErr.Error()
-		s.log.Warn("mirror", "err", mirrorErr)
+	if res.MirrorWarning != nil {
+		notice = res.MirrorWarning.Error()
+		s.log.Warn("mirror", "err", res.MirrorWarning)
 	}
+	back := localPath(r.FormValue("voltar"))
+	view := viewOf(r.FormValue("vista"))
 	target := "/agenda?data=" + a.Start.In(s.opts.Location).Format("2006-01-02")
+	if view == viewWeek {
+		target = "/agenda/semana?inicio=" + mondayOf(a.Start, s.opts.Location).Format("2006-01-02")
+	}
 	if back != "" {
 		target = back
 	}
@@ -219,25 +253,35 @@ func (s *Server) afterAppointmentWrite(w http.ResponseWriter, r *http.Request, a
 		s.redirectWithFlash(w, r, target, msg)
 		return
 	}
+	s.notify(w, msg)
+	w.Header().Set("HX-Retarget", "#agenda-main")
+	w.Header().Set("HX-Reswap", "outerHTML")
+	w.Header().Set("HX-Push-Url", target)
+	if view == viewWeek {
+		data, err := s.weekData(r, mondayOf(a.Start, s.opts.Location), notice)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		s.render(w, r, http.StatusOK, "agenda_week", "agenda-week", data)
+		return
+	}
 	data, err := s.dayData(r, a.Start, notice)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	toast(w, msg)
-	w.Header().Set("HX-Retarget", "#agenda-main")
-	w.Header().Set("HX-Reswap", "outerHTML")
 	s.render(w, r, http.StatusOK, "agenda_day", "agenda-day", data)
 }
 
-// renderForm re-renders a form with validation errors (422). For htmx the
-// swap is redirected into the modal body so the error replaces the form.
-func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, page, partial string, data any) {
+// renderForm re-renders the appointment form with validation errors (422).
+// For htmx the swap goes into the modal body so the error replaces the form.
+func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, data appointmentFormData) {
 	if isHX(r) {
 		w.Header().Set("HX-Retarget", "#modal-body")
 		w.Header().Set("HX-Reswap", "innerHTML")
 	}
-	s.render(w, r, http.StatusUnprocessableEntity, page, partial, data)
+	s.render(w, r, http.StatusUnprocessableEntity, "appointment_form", "appointment-form", data)
 }
 
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
@@ -246,25 +290,11 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	msg := "Planilha sincronizada: " + itoa(n) + " atendimento(s)"
+	msg := "Planilha sincronizada: " + strconv.Itoa(n) + " atendimento(s)"
 	if isHX(r) {
-		toast(w, msg)
+		s.notify(w, msg)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	s.redirectWithFlash(w, r, "/agenda", msg)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }

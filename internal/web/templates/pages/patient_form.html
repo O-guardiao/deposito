@@ -6,10 +6,9 @@
     {{if .IsEdit}}<span class="pid muted">{{.Patient.ID}}</span>{{end}}
   </header>
   <form class="form" method="post" action="{{if .IsEdit}}/pacientes/{{.Patient.ID}}{{else}}/pacientes{{end}}">
-    {{with .Errors}}{{with index . "_"}}<p class="field-error" role="alert">{{.}}</p>{{end}}{{end}}
     <label>Nome *
       <input type="text" name="nome" value="{{.Patient.Name}}" required autofocus autocomplete="name">
-      {{with .Errors}}{{with index . "name"}}<span class="field-error">{{.}}</span>{{end}}{{end}}
+      {{with fieldError .Errors "name"}}<span class="field-error">{{.}}</span>{{end}}
     </label>
     <div class="row">
       <label>Telefone / WhatsApp

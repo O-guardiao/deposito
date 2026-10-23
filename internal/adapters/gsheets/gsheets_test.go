@@ -2,7 +2,6 @@ package gsheets
 
 import (
 	"context"
-	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,6 +16,7 @@ import (
 type fakeSheets struct {
 	tabs map[string][][]string // includes header row at index 0
 	ids  map[string]int64
+	spec SpreadsheetSpec
 }
 
 func newFakeSheets() *fakeSheets {
@@ -98,22 +98,21 @@ func (f *fakeSheets) AddSheet(_ context.Context, _ string, title string) error {
 	return nil
 }
 
-func (f *fakeSheets) DeleteRow(_ context.Context, _ string, sheetID, row int64) error {
-	for title, id := range f.ids {
-		if id == sheetID {
-			rows := f.tabs[title]
-			f.tabs[title] = append(rows[:row], rows[row+1:]...)
-			return nil
-		}
-	}
-	return fmt.Errorf("sheet %d not found", sheetID)
-}
-
-func (f *fakeSheets) CreateSpreadsheet(ctx context.Context, _ string, tabs []string) (string, error) {
-	for _, t := range tabs {
+func (f *fakeSheets) CreateSpreadsheet(ctx context.Context, spec SpreadsheetSpec) (string, error) {
+	f.spec = spec
+	for _, t := range spec.Tabs {
 		_ = f.AddSheet(ctx, "", t)
 	}
 	return "sheet-1", nil
+}
+
+func TestCellStringKeepsNumbersReadable(t *testing.T) {
+	cases := map[interface{}]string{11987654321.0: "11987654321", 1198765432.0: "1198765432", "texto": "texto", true: "TRUE", nil: "", 3.5: "3.5"}
+	for in, want := range cases {
+		if got := cellString(in); got != want {
+			t.Errorf("cellString(%v) = %q, want %q", in, got, want)
+		}
+	}
 }
 
 func TestRowMappingRoundTrip(t *testing.T) {
@@ -139,15 +138,22 @@ func TestRowMappingRoundTrip(t *testing.T) {
 	if rowToPatient([]string{"P3", "BR", "", "", "25/12/1980"}, loc).BirthDate.Year() != 1980 {
 		t.Fatal("dd/mm/yyyy typed by hand should parse")
 	}
+	if rowToAppointment([]string{"ev", "P1", "t", "23/10/2026 14:00", "", "typo"}, loc).Status != domain.StatusScheduled {
+		t.Fatal("unknown status must fall back to scheduled")
+	}
 }
 
 func TestBootstrapAndRepos(t *testing.T) {
 	ctx := context.Background()
 	loc := time.UTC
 	api := newFakeSheets()
-	id, err := Bootstrap(ctx, api, "")
+	sp, _ := time.LoadLocation("America/Sao_Paulo")
+	id, err := EnsureSpreadsheet(ctx, api, "", sp)
 	if err != nil || id != "sheet-1" {
 		t.Fatalf("bootstrap: %v %q", err, id)
+	}
+	if api.spec.Locale != "pt_BR" || api.spec.TimeZone != "America/Sao_Paulo" || api.spec.Title != DefaultSpreadsheetTitle {
+		t.Fatalf("spreadsheet created without pt_BR locale/timezone: %+v", api.spec)
 	}
 	for _, tab := range AllTabs {
 		if strings.Join(api.tabs[tab.Title][0], ",") != strings.Join(tab.Headers, ",") {
@@ -155,7 +161,7 @@ func TestBootstrapAndRepos(t *testing.T) {
 		}
 	}
 	// Second bootstrap on an existing sheet is a no-op.
-	if id2, err := Bootstrap(ctx, api, id); err != nil || id2 != id || len(api.tabs[TabPatients.Title]) != 1 {
+	if id2, err := EnsureSpreadsheet(ctx, api, id, sp); err != nil || id2 != id || len(api.tabs[TabPatients.Title]) != 1 {
 		t.Fatalf("re-bootstrap changed state: %v", err)
 	}
 
@@ -182,9 +188,6 @@ func TestBootstrapAndRepos(t *testing.T) {
 	if _, err := patients.Get(ctx, "nope"); !domain.IsNotFound(err) {
 		t.Fatalf("want not found, got %v", err)
 	}
-	if res, _ := patients.Search(ctx, "bru"); len(res) != 1 {
-		t.Fatalf("search: %+v", res)
-	}
 
 	evs := NewEvolutionRepo(api, id, loc)
 	_ = evs.Add(ctx, domain.Evolution{ID: "E1", PatientID: "P0001", Date: now, Text: "a", CreatedAt: now})
@@ -201,16 +204,16 @@ func TestBootstrapAndRepos(t *testing.T) {
 	if rows := api.tabs[TabAppointments.Title]; len(rows) != 2 || rows[1][5] != "cancelado" {
 		t.Fatalf("mirror upsert: %v", rows)
 	}
-	if err := mirror.Delete(ctx, "ev1"); err != nil || len(api.tabs[TabAppointments.Title]) != 1 {
-		t.Fatalf("mirror delete: %v %v", err, api.tabs[TabAppointments.Title])
-	}
-	if err := mirror.ReplaceAll(ctx, []domain.Appointment{a, {ID: "ev2", Start: now, End: now}}); err != nil {
+	_ = mirror.Upsert(ctx, domain.Appointment{ID: "stale", PatientID: "P0002", Start: now, End: now, Status: domain.StatusScheduled})
+	// Reconcile: live rows replace scheduled ones, the cancelled row survives.
+	if err := mirror.Reconcile(ctx, []domain.Appointment{{ID: "ev2", PatientID: "P0002", Start: now, End: now, Status: domain.StatusScheduled}}); err != nil {
 		t.Fatal(err)
 	}
-	if rows := api.tabs[TabAppointments.Title]; len(rows) != 3 || rows[0][0] != "EventoID" {
-		t.Fatalf("replace all: %v", rows)
+	rows := api.tabs[TabAppointments.Title]
+	if len(rows) != 3 || rows[0][0] != "EventoID" || rows[1][0] != "ev2" || rows[2][0] != "ev1" || rows[2][5] != "cancelado" {
+		t.Fatalf("reconcile: %v", rows)
 	}
-	if err := mirror.ReplaceAll(ctx, nil); err != nil || len(api.tabs[TabAppointments.Title]) != 1 {
-		t.Fatalf("replace all empty: %v %v", err, api.tabs[TabAppointments.Title])
+	if err := mirror.Reconcile(ctx, nil); err != nil || len(api.tabs[TabAppointments.Title]) != 2 {
+		t.Fatalf("reconcile empty keeps cancelled only: %v %v", err, api.tabs[TabAppointments.Title])
 	}
 }

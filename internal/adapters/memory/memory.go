@@ -43,18 +43,6 @@ func (r *PatientRepo) Get(_ context.Context, id string) (domain.Patient, error) 
 	return p, nil
 }
 
-// Search implements domain.PatientRepository.
-func (r *PatientRepo) Search(ctx context.Context, q string) ([]domain.Patient, error) {
-	all, _ := r.List(ctx)
-	out := all[:0]
-	for _, p := range all {
-		if p.MatchesQuery(q) {
-			out = append(out, p)
-		}
-	}
-	return out, nil
-}
-
 // Save implements domain.PatientRepository.
 func (r *PatientRepo) Save(_ context.Context, p domain.Patient) error {
 	r.mu.Lock()
@@ -182,28 +170,24 @@ func (m *Mirror) Upsert(_ context.Context, a domain.Appointment) error {
 	return nil
 }
 
-// Delete implements domain.AppointmentMirror.
-func (m *Mirror) Delete(_ context.Context, id string) error {
+// Reconcile implements domain.AppointmentMirror: live items replace every
+// row except the cancelled ones, which are history and stay.
+func (m *Mirror) Reconcile(_ context.Context, live []domain.Appointment) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.Fail != nil {
 		return m.Fail
 	}
-	delete(m.items, id)
-	return nil
-}
-
-// ReplaceAll implements domain.AppointmentMirror.
-func (m *Mirror) ReplaceAll(_ context.Context, items []domain.Appointment) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.Fail != nil {
-		return m.Fail
+	next := make(map[string]domain.Appointment, len(live)+len(m.items))
+	for id, a := range m.items {
+		if a.Status == domain.StatusCancelled {
+			next[id] = a
+		}
 	}
-	m.items = make(map[string]domain.Appointment, len(items))
-	for _, a := range items {
-		m.items[a.ID] = a
+	for _, a := range live {
+		next[a.ID] = a
 	}
+	m.items = next
 	return nil
 }
 

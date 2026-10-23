@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,16 +10,26 @@ import (
 	"github.com/o-guardiao/deposito/internal/domain"
 )
 
-// ErrMirror signals that the agenda write succeeded but the spreadsheet mirror
-// did not. Callers should treat it as a warning, not a failure.
-var ErrMirror = errors.New("agenda gravada, mas a planilha não foi atualizada")
-
 // ScheduleInput describes a new session.
 type ScheduleInput struct {
 	PatientID string
 	Start     time.Time
 	Duration  time.Duration
 	Notes     string
+}
+
+func (in ScheduleInput) validate() error {
+	ve := &domain.ValidationError{}
+	if in.PatientID == "" {
+		ve.Add("patientId", "Escolha o paciente")
+	}
+	if in.Start.IsZero() {
+		ve.Add("start", "Informe data e hora")
+	}
+	if ve.Empty() {
+		return nil
+	}
+	return ve
 }
 
 // RescheduleInput describes changes to an existing session.
@@ -34,6 +43,16 @@ type RescheduleInput struct {
 type DayView struct {
 	Date  time.Time
 	Items []domain.Appointment
+}
+
+// WriteResult is the outcome of a successful agenda write. MirrorWarning is
+// non-nil when the live agenda was updated but the spreadsheet mirror could
+// not be; the appointment is valid and persisted either way, so callers show
+// the warning instead of failing. Real failures come back as the error
+// return of the method instead.
+type WriteResult struct {
+	Appointment   domain.Appointment
+	MirrorWarning error
 }
 
 // AgendaService coordinates the live agenda and its spreadsheet mirror.
@@ -52,16 +71,13 @@ func NewAgendaService(a domain.Agenda, m domain.AppointmentMirror, p domain.Pati
 	if loc == nil {
 		loc = time.UTC
 	}
-	return &AgendaService{agenda: a, mirror: m, patients: p, clock: c, loc: loc, DefaultDuration: time.Hour}
+	return &AgendaService{agenda: a, mirror: m, patients: p, clock: c, loc: loc, DefaultDuration: domain.DefaultSessionDuration}
 }
-
-// Location returns the time zone used for day boundaries.
-func (s *AgendaService) Location() *time.Location { return s.loc }
 
 // Day lists the appointments of one calendar day, sorted by start.
 func (s *AgendaService) Day(ctx context.Context, date time.Time) (DayView, error) {
-	start := startOfDay(date, s.loc)
-	items, err := s.agenda.ListBetween(ctx, start, start.AddDate(0, 0, 1))
+	start := domain.StartOfDay(date, s.loc)
+	items, err := s.agenda.ListBetween(ctx, start, nextDay(start))
 	if err != nil {
 		return DayView{}, fmt.Errorf("listar agenda: %w", err)
 	}
@@ -69,23 +85,28 @@ func (s *AgendaService) Day(ctx context.Context, date time.Time) (DayView, error
 	return DayView{Date: start, Items: items}, nil
 }
 
-// Week lists seven consecutive days starting at the given date, each with its items.
+// Week lists seven consecutive days starting at the given date, each with its
+// items. Days are built by calendar arithmetic so the grouping is right even
+// in time zones with daylight saving.
 func (s *AgendaService) Week(ctx context.Context, start time.Time) ([]DayView, error) {
-	first := startOfDay(start, s.loc)
-	items, err := s.agenda.ListBetween(ctx, first, first.AddDate(0, 0, 7))
+	first := domain.StartOfDay(start, s.loc)
+	days := make([]DayView, 7)
+	d := first
+	for i := range days {
+		days[i].Date = d
+		d = nextDay(d)
+	}
+	items, err := s.agenda.ListBetween(ctx, first, d)
 	if err != nil {
 		return nil, fmt.Errorf("listar agenda: %w", err)
 	}
-	days := make([]DayView, 7)
-	for i := range days {
-		days[i].Date = first.AddDate(0, 0, i)
-	}
 	for _, a := range items {
-		idx := int(startOfDay(a.Start, s.loc).Sub(first).Hours() / 24)
-		if idx < 0 || idx >= 7 {
-			continue
+		for i := range days {
+			if domain.SameDay(a.Start, days[i].Date, s.loc) {
+				days[i].Items = append(days[i].Items, a)
+				break
+			}
 		}
-		days[idx].Items = append(days[idx].Items, a)
 	}
 	for i := range days {
 		sortByStart(days[i].Items)
@@ -99,26 +120,19 @@ func (s *AgendaService) Get(ctx context.Context, id string) (domain.Appointment,
 }
 
 // Schedule creates a session for a patient. The title, location and reminders
-// are derived from the patient record. A returned ErrMirror still carries a
-// valid appointment.
-func (s *AgendaService) Schedule(ctx context.Context, in ScheduleInput) (domain.Appointment, error) {
-	ve := &domain.ValidationError{}
-	if in.PatientID == "" {
-		ve.Add("patientId", "Escolha o paciente")
-	}
-	if in.Start.IsZero() {
-		ve.Add("start", "Informe data e hora")
-	}
-	if !ve.Empty() {
-		return domain.Appointment{}, ve
+// are derived from the patient record.
+func (s *AgendaService) Schedule(ctx context.Context, in ScheduleInput) (WriteResult, error) {
+	if err := in.validate(); err != nil {
+		return WriteResult{}, err
 	}
 	p, err := s.patients.Get(ctx, in.PatientID)
 	if err != nil {
 		if domain.IsNotFound(err) {
+			ve := &domain.ValidationError{}
 			ve.Add("patientId", "Paciente não encontrado")
-			return domain.Appointment{}, ve
+			return WriteResult{}, ve
 		}
-		return domain.Appointment{}, err
+		return WriteResult{}, err
 	}
 	dur := in.Duration
 	if dur <= 0 {
@@ -126,7 +140,7 @@ func (s *AgendaService) Schedule(ctx context.Context, in ScheduleInput) (domain.
 	}
 	a := domain.Appointment{
 		PatientID: p.ID,
-		Title:     TitleFor(p),
+		Title:     p.SessionTitle(),
 		Start:     in.Start,
 		End:       in.Start.Add(dur),
 		Status:    domain.StatusScheduled,
@@ -135,25 +149,22 @@ func (s *AgendaService) Schedule(ctx context.Context, in ScheduleInput) (domain.
 		UpdatedAt: s.clock.Now(),
 	}
 	if err := a.Validate(); err != nil {
-		return domain.Appointment{}, err
+		return WriteResult{}, err
 	}
 	created, err := s.agenda.Create(ctx, a)
 	if err != nil {
-		return domain.Appointment{}, fmt.Errorf("criar na agenda: %w", err)
+		return WriteResult{}, fmt.Errorf("criar na agenda: %w", err)
 	}
-	return created, s.mirrorUpsert(ctx, created)
+	return s.mirrored(ctx, created), nil
 }
 
-// Reschedule changes time, duration or notes of an existing session.
-func (s *AgendaService) Reschedule(ctx context.Context, id string, in RescheduleInput) (domain.Appointment, error) {
+// Reschedule changes time, duration or notes of an existing session. A
+// session that had been marked as done goes back to scheduled, since it is
+// being moved to a new moment.
+func (s *AgendaService) Reschedule(ctx context.Context, id string, in RescheduleInput) (WriteResult, error) {
 	a, err := s.agenda.Get(ctx, id)
 	if err != nil {
-		return domain.Appointment{}, err
-	}
-	if in.Start.IsZero() {
-		ve := &domain.ValidationError{}
-		ve.Add("start", "Informe data e hora")
-		return domain.Appointment{}, ve
+		return WriteResult{}, err
 	}
 	dur := in.Duration
 	if dur <= 0 {
@@ -166,60 +177,60 @@ func (s *AgendaService) Reschedule(ctx context.Context, id string, in Reschedule
 	a.End = in.Start.Add(dur)
 	a.AllDay = false
 	a.Notes = strings.TrimSpace(in.Notes)
+	if a.Status == domain.StatusDone {
+		a.Status = domain.StatusScheduled
+	}
 	a.UpdatedAt = s.clock.Now()
 	if err := a.Validate(); err != nil {
-		return domain.Appointment{}, err
+		return WriteResult{}, err
 	}
 	if err := s.agenda.Update(ctx, a); err != nil {
-		return domain.Appointment{}, fmt.Errorf("atualizar agenda: %w", err)
+		return WriteResult{}, fmt.Errorf("atualizar agenda: %w", err)
 	}
-	return a, s.mirrorUpsert(ctx, a)
+	return s.mirrored(ctx, a), nil
 }
 
-// Cancel removes the session from the agenda and marks it cancelled in the mirror.
-func (s *AgendaService) Cancel(ctx context.Context, id string) error {
+// Cancel removes the session from the agenda and marks it cancelled in the
+// mirror. The returned appointment is the cancelled one.
+func (s *AgendaService) Cancel(ctx context.Context, id string) (WriteResult, error) {
 	a, err := s.agenda.Get(ctx, id)
 	if err != nil {
-		return err
+		return WriteResult{}, err
 	}
 	if err := s.agenda.Delete(ctx, id); err != nil {
-		return fmt.Errorf("remover da agenda: %w", err)
+		return WriteResult{}, fmt.Errorf("remover da agenda: %w", err)
 	}
 	a.Status = domain.StatusCancelled
 	a.UpdatedAt = s.clock.Now()
-	return s.mirrorUpsert(ctx, a)
+	return s.mirrored(ctx, a), nil
 }
 
 // MarkDone flags the session as attended.
-func (s *AgendaService) MarkDone(ctx context.Context, id string) (domain.Appointment, error) {
-	return s.setStatus(ctx, id, domain.StatusDone)
-}
-
-func (s *AgendaService) setStatus(ctx context.Context, id string, st domain.AppointmentStatus) (domain.Appointment, error) {
+func (s *AgendaService) MarkDone(ctx context.Context, id string) (WriteResult, error) {
 	a, err := s.agenda.Get(ctx, id)
 	if err != nil {
-		return domain.Appointment{}, err
+		return WriteResult{}, err
 	}
-	a.Status = st
+	a.Status = domain.StatusDone
 	a.UpdatedAt = s.clock.Now()
 	if err := s.agenda.Update(ctx, a); err != nil {
-		return domain.Appointment{}, fmt.Errorf("atualizar agenda: %w", err)
+		return WriteResult{}, fmt.Errorf("atualizar agenda: %w", err)
 	}
-	return a, s.mirrorUpsert(ctx, a)
+	return s.mirrored(ctx, a), nil
 }
 
 // Link attaches an agenda entry created outside the app to a patient.
-func (s *AgendaService) Link(ctx context.Context, id, patientID string) (domain.Appointment, error) {
+func (s *AgendaService) Link(ctx context.Context, appointmentID, patientID string) (WriteResult, error) {
 	p, err := s.patients.Get(ctx, patientID)
 	if err != nil {
-		return domain.Appointment{}, err
+		return WriteResult{}, err
 	}
-	a, err := s.agenda.Get(ctx, id)
+	a, err := s.agenda.Get(ctx, appointmentID)
 	if err != nil {
-		return domain.Appointment{}, err
+		return WriteResult{}, err
 	}
 	a.PatientID = p.ID
-	a.Title = TitleFor(p)
+	a.Title = p.SessionTitle()
 	if a.Location == "" {
 		a.Location = p.Address
 	}
@@ -228,24 +239,23 @@ func (s *AgendaService) Link(ctx context.Context, id, patientID string) (domain.
 	}
 	a.UpdatedAt = s.clock.Now()
 	if err := s.agenda.Update(ctx, a); err != nil {
-		return domain.Appointment{}, fmt.Errorf("atualizar agenda: %w", err)
+		return WriteResult{}, fmt.Errorf("atualizar agenda: %w", err)
 	}
-	return a, s.mirrorUpsert(ctx, a)
+	return s.mirrored(ctx, a), nil
 }
 
-func (s *AgendaService) mirrorUpsert(ctx context.Context, a domain.Appointment) error {
+// mirrored copies the appointment to the mirror and turns a failure there
+// into a warning, because the agenda write has already succeeded.
+func (s *AgendaService) mirrored(ctx context.Context, a domain.Appointment) WriteResult {
+	res := WriteResult{Appointment: a}
 	if err := s.mirror.Upsert(ctx, a); err != nil {
-		return fmt.Errorf("%w: %v", ErrMirror, err)
+		res.MirrorWarning = fmt.Errorf("agenda gravada, mas a planilha não foi atualizada: %w", err)
 	}
-	return nil
+	return res
 }
 
-// TitleFor is the calendar summary used for a patient's sessions.
-func TitleFor(p domain.Patient) string { return "Fisio: " + p.Name }
-
-func startOfDay(t time.Time, loc *time.Location) time.Time {
-	t = t.In(loc)
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+func nextDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, t.Location())
 }
 
 func sortByStart(items []domain.Appointment) {

@@ -36,7 +36,7 @@ func (s *Server) handlePatientList(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	s.render(w, r, http.StatusOK, "patient_list", "patient-list", patientListData{Query: q, Patients: items, Now: time.Now()})
+	s.render(w, r, http.StatusOK, "patient_list", "patient-list", patientListData{Query: q, Patients: items, Now: s.now()})
 }
 
 func (s *Server) handlePatientNew(w http.ResponseWriter, r *http.Request) {
@@ -54,8 +54,11 @@ func (s *Server) patientInput(r *http.Request) app.PatientInput {
 	}
 }
 
-func patientFromInput(id string, in app.PatientInput) domain.Patient {
-	return domain.Patient{ID: id, Name: in.Name, Phone: in.Phone, Address: in.Address, BirthDate: in.BirthDate, Diagnosis: in.Diagnosis, Notes: in.Notes}
+// invalidPatientForm re-renders the form with what the user typed.
+func (s *Server) invalidPatientForm(w http.ResponseWriter, r *http.Request, id string, in app.PatientInput, err error) {
+	p := domain.Patient{ID: id}
+	in.Apply(&p, s.now())
+	s.render(w, r, http.StatusUnprocessableEntity, "patient_form", "", patientFormData{Patient: p, Errors: fieldErrors(err), IsEdit: id != ""})
 }
 
 func (s *Server) handlePatientCreate(w http.ResponseWriter, r *http.Request) {
@@ -70,19 +73,29 @@ func (s *Server) handlePatientCreate(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, r, err)
 			return
 		}
-		s.render(w, r, http.StatusUnprocessableEntity, "patient_form", "", patientFormData{Patient: patientFromInput("", in), Errors: fieldErrors(err)})
+		s.invalidPatientForm(w, r, "", in, err)
 		return
 	}
 	s.redirectWithFlash(w, r, "/pacientes/"+p.ID, "Paciente cadastrado")
 }
 
+// recordData assembles the ficha view model for a patient.
+func (s *Server) recordData(r *http.Request, id string) (patientRecordData, error) {
+	rec, err := s.svc().Patients.GetRecord(r.Context(), id)
+	if err != nil {
+		return patientRecordData{}, err
+	}
+	now := s.now()
+	return patientRecordData{PatientRecord: rec, Now: now, EvoDate: now, CurrentPath: "/pacientes/" + id}, nil
+}
+
 func (s *Server) handlePatientRecord(w http.ResponseWriter, r *http.Request) {
-	rec, err := s.svc().Patients.Record(r.Context(), r.PathValue("id"))
+	data, err := s.recordData(r, r.PathValue("id"))
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	s.render(w, r, http.StatusOK, "patient_record", "", patientRecordData{PatientRecord: rec, Now: time.Now(), EvoDate: time.Now(), CurrentPath: r.URL.Path})
+	s.render(w, r, http.StatusOK, "patient_record", "", data)
 }
 
 func (s *Server) handlePatientEdit(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +120,7 @@ func (s *Server) handlePatientUpdate(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, r, err)
 			return
 		}
-		s.render(w, r, http.StatusUnprocessableEntity, "patient_form", "", patientFormData{Patient: patientFromInput(id, in), Errors: fieldErrors(err), IsEdit: true})
+		s.invalidPatientForm(w, r, id, in, err)
 		return
 	}
 	s.redirectWithFlash(w, r, "/pacientes/"+p.ID, "Ficha atualizada")
@@ -119,20 +132,19 @@ func (s *Server) handleEvolutionCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	date := s.parseDate(r.PostForm.Get("data"))
-	text := r.PostForm.Get("texto")
-	_, err := s.svc().Evolutions.Add(r.Context(), id, date, text)
+	in := app.EvolutionInput{PatientID: id, Date: s.parseDate(r.PostForm.Get("data")), Text: r.PostForm.Get("texto")}
+	_, err := s.svc().Evolutions.Add(r.Context(), in)
 	if err != nil {
 		if _, ok := domain.AsValidation(err); !ok {
 			s.fail(w, r, err)
 			return
 		}
-		rec, rerr := s.svc().Patients.Record(r.Context(), id)
+		data, rerr := s.recordData(r, id)
 		if rerr != nil {
 			s.fail(w, r, rerr)
 			return
 		}
-		data := patientRecordData{PatientRecord: rec, Now: time.Now(), EvoErrors: fieldErrors(err), EvoText: text, EvoDate: date, CurrentPath: r.URL.Path}
+		data.EvoErrors, data.EvoText, data.EvoDate = fieldErrors(err), in.Text, in.Date
 		if isHX(r) {
 			w.Header().Set("HX-Retarget", "#evolutions")
 			w.Header().Set("HX-Reswap", "outerHTML")
@@ -144,11 +156,11 @@ func (s *Server) handleEvolutionCreate(w http.ResponseWriter, r *http.Request) {
 		s.redirectWithFlash(w, r, "/pacientes/"+id, "Evolução registrada")
 		return
 	}
-	rec, err := s.svc().Patients.Record(r.Context(), id)
+	data, err := s.recordData(r, id)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	toast(w, "Evolução registrada")
-	s.render(w, r, http.StatusOK, "patient_record", "evolutions", patientRecordData{PatientRecord: rec, Now: time.Now(), EvoDate: time.Now(), CurrentPath: "/pacientes/" + id})
+	s.notify(w, "Evolução registrada")
+	s.render(w, r, http.StatusOK, "patient_record", "evolutions", data)
 }

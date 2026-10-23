@@ -11,7 +11,7 @@
   <div class="toolbar">
     <a class="btn ghost" href="/agenda" hx-get="/agenda" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true">Hoje</a>
     <a class="btn ghost" href="/agenda/semana?inicio={{isoDate .Day.Date}}">Ver semana</a>
-    <button type="button" class="btn primary" hx-get="/agenda/novo?data={{isoDate .Day.Date}}" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-plus"}}Novo atendimento</button>
+    <button type="button" class="btn primary" hx-get="/agenda/novo?data={{isoDate .Day.Date}}&vista=dia" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-plus"}}Novo atendimento</button>
   </div>
   {{if .Notice}}<div class="notice warn" role="alert">{{.Notice}}</div>{{end}}
   {{if not .Day.Items}}
@@ -48,10 +48,12 @@
         <button class="btn small" type="submit">{{template "icon-check"}}Concluir</button>
       </form>
       {{end}}
-      <a class="btn small ghost" href="/agenda/{{.ID}}/editar" hx-get="/agenda/{{.ID}}/editar" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-clock"}}Remarcar</a>
+      <a class="btn small ghost" href="/agenda/{{.ID}}/editar" hx-get="/agenda/{{.ID}}/editar?vista=dia" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-clock"}}Remarcar</a>
+      {{if ne .Status "concluido"}}
       <form method="post" action="/agenda/{{.ID}}/cancelar" hx-post="/agenda/{{.ID}}/cancelar" hx-target="#agenda-main" hx-swap="outerHTML" hx-confirm="Cancelar este atendimento? Ele será removido da agenda do Google.">
         <button class="btn small danger" type="submit">{{template "icon-x"}}Cancelar</button>
       </form>
+      {{end}}
     </div>
     {{else}}
     <form class="link-form" method="post" action="/agenda/{{.ID}}/vincular" hx-post="/agenda/{{.ID}}/vincular" hx-target="#agenda-main" hx-swap="outerHTML">
@@ -80,8 +82,9 @@
   <div class="toolbar">
     <a class="btn ghost" href="/agenda/semana" hx-get="/agenda/semana" hx-target="#agenda-main" hx-swap="outerHTML" hx-push-url="true">Esta semana</a>
     <a class="btn ghost" href="/agenda">Ver dia</a>
-    <button type="button" class="btn primary" hx-get="/agenda/novo?data={{isoDate $first}}" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-plus"}}Novo atendimento</button>
+    <button type="button" class="btn primary" hx-get="/agenda/novo?data={{isoDate $first}}&vista=semana" hx-target="#modal-body" hx-swap="innerHTML">{{template "icon-plus"}}Novo atendimento</button>
   </div>
+  {{if .Notice}}<div class="notice warn" role="alert">{{.Notice}}</div>{{end}}
   <div class="week-grid">
     {{range .Days}}
     <article class="day-card {{if isToday .Date $.Now}}today{{end}}">
@@ -94,7 +97,7 @@
         {{range .Items}}
         <li class="mini status-{{.Status}} {{if not .Linked}}unlinked{{end}}">
           <time>{{if .AllDay}}dia{{else}}{{fmtTime .Start}}{{end}}</time>
-          {{if .Linked}}<a href="/pacientes/{{.PatientID}}">{{.Title}}</a>{{else}}<span>{{.Title}}</span>{{end}}
+          {{if .Linked}}<a href="/pacientes/{{.PatientID}}" title="{{.Title}}">{{.Title}}</a>{{else}}<span title="{{.Title}}">{{.Title}}</span>{{end}}
         </li>
         {{end}}
       </ul>
@@ -105,12 +108,12 @@
 {{end}}
 
 {{define "appointment-form"}}
-<form class="form" method="post" action="{{if .IsEdit}}/agenda/{{.Appointment.ID}}{{else}}/agenda{{end}}" hx-post="{{if .IsEdit}}/agenda/{{.Appointment.ID}}{{else}}/agenda{{end}}" hx-target="#agenda-main" hx-swap="outerHTML">
+{{/* Inside the modal (htmx) the form posts into #modal-body and the server retargets the agenda on success; as a full page it is a plain form. */}}
+<form class="form" method="post" action="{{if .IsEdit}}/agenda/{{.Appointment.ID}}{{else}}/agenda{{end}}"{{if .Modal}} hx-post="{{if .IsEdit}}/agenda/{{.Appointment.ID}}{{else}}/agenda{{end}}" hx-target="#modal-body" hx-swap="innerHTML"{{end}}>
   <header class="form-head">
     <h2>{{if .IsEdit}}Remarcar atendimento{{else}}Novo atendimento{{end}}</h2>
-    <button type="button" class="btn icon-btn ghost" data-close-modal aria-label="Fechar">{{template "icon-x"}}</button>
+    {{if .Modal}}<button type="button" class="btn icon-btn ghost" data-close-modal aria-label="Fechar">{{template "icon-x"}}</button>{{end}}
   </header>
-  {{with .Errors}}{{with index . "_"}}<p class="field-error" role="alert">{{.}}</p>{{end}}{{end}}
   {{if .IsEdit}}
     <p class="muted">{{.Appointment.Title}}</p>
   {{else}}
@@ -119,17 +122,17 @@
       <option value="">Escolha…</option>
       {{range .Patients}}<option value="{{.ID}}" {{if eq .ID $.Appointment.PatientID}}selected{{end}}>{{.Name}}</option>{{end}}
     </select>
-    {{with .Errors}}{{with index . "patientId"}}<span class="field-error">{{.}}</span>{{end}}{{end}}
+    {{with fieldError .Errors "patientId"}}<span class="field-error">{{.}}</span>{{end}}
   </label>
   {{end}}
   <div class="row">
     <label>Início
       <input type="datetime-local" name="inicio" value="{{isoLocal .Appointment.Start}}" required>
-      {{with .Errors}}{{with index . "start"}}<span class="field-error">{{.}}</span>{{end}}{{end}}
+      {{with fieldError .Errors "start"}}<span class="field-error">{{.}}</span>{{end}}
     </label>
     <label>Duração
       <select name="duracao">
-        {{range $m := durationOptions}}<option value="{{$m}}" {{if eq $m $.Minutes}}selected{{end}}>{{$m}} min</option>{{end}}
+        {{range $m := durationOptions .Minutes}}<option value="{{$m}}" {{if eq $m $.Minutes}}selected{{end}}>{{$m}} min</option>{{end}}
       </select>
     </label>
   </div>
@@ -138,8 +141,9 @@
   </label>
   <p class="muted small-text">Lembretes no Google Agenda: 1 dia antes e 1 hora antes.</p>
   <input type="hidden" name="voltar" value="{{.Return}}">
+  <input type="hidden" name="vista" value="{{.View}}">
   <footer class="form-actions">
-    <button type="button" class="btn ghost" data-close-modal>Voltar</button>
+    {{if .Modal}}<button type="button" class="btn ghost" data-close-modal>Voltar</button>{{else}}<a class="btn ghost" href="{{if .Return}}{{.Return}}{{else}}/agenda?data={{isoDate .Appointment.Start}}{{end}}">Voltar</a>{{end}}
     <button type="submit" class="btn primary">{{template "icon-check"}}Salvar</button>
   </footer>
 </form>

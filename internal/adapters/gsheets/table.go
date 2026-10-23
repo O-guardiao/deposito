@@ -61,26 +61,6 @@ func (t table) append(ctx context.Context, row []string) error {
 	return nil
 }
 
-func (t table) deleteByKey(ctx context.Context, key string) error {
-	idx, err := t.find(ctx, key)
-	if err != nil || idx < 0 {
-		return err
-	}
-	ids, err := t.api.SheetIDs(ctx, t.id)
-	if err != nil {
-		return fmt.Errorf("ler abas: %w", err)
-	}
-	sheetID, ok := ids[t.tab.Title]
-	if !ok {
-		return fmt.Errorf("aba %s não existe", t.tab.Title)
-	}
-	// +1 skips the header row.
-	if err := t.api.DeleteRow(ctx, t.id, sheetID, int64(idx+1)); err != nil {
-		return fmt.Errorf("remover de %s: %w", t.tab.Title, err)
-	}
-	return nil
-}
-
 func (t table) replaceAll(ctx context.Context, rows [][]string) error {
 	if err := t.api.ClearRange(ctx, t.id, t.tab.dataRange()); err != nil {
 		return fmt.Errorf("limpar %s: %w", t.tab.Title, err)

@@ -16,6 +16,9 @@ const (
 	propStatus    = "fisio_status"
 )
 
+// untitled is shown for events the user saved without a summary.
+const untitled = "(sem título)"
+
 // ReminderPolicy defines the popup reminders attached to app-created events.
 type ReminderPolicy struct {
 	// MinutesBefore lists each popup offset, e.g. {1440, 60} = 1 day and 1 hour before.
@@ -36,12 +39,15 @@ func (p ReminderPolicy) toEvent() *calendar.EventReminders {
 // eventToAppointment converts a calendar event. Events without the app's
 // patient property are returned unlinked with the raw summary as title.
 func eventToAppointment(ev *calendar.Event, loc *time.Location) (domain.Appointment, error) {
-	a := domain.Appointment{ID: ev.Id, Title: ev.Summary, Notes: ev.Description, Location: ev.Location}
+	a := domain.Appointment{ID: ev.Id, Title: ev.Summary, Notes: ev.Description, Location: ev.Location, Status: domain.StatusScheduled}
+	if a.Title == "" {
+		a.Title = untitled
+	}
 	if ev.ExtendedProperties != nil && ev.ExtendedProperties.Private != nil {
 		a.PatientID = ev.ExtendedProperties.Private[propPatientID]
-		a.Status = domain.ParseStatus(ev.ExtendedProperties.Private[propStatus])
-	} else {
-		a.Status = domain.StatusScheduled
+		if st, ok := domain.ParseStatus(ev.ExtendedProperties.Private[propStatus]); ok {
+			a.Status = st
+		}
 	}
 	var err error
 	a.Start, a.AllDay, err = parseEventTime(ev.Start, loc)
@@ -75,7 +81,10 @@ func parseEventTime(dt *calendar.EventDateTime, loc *time.Location) (time.Time, 
 	return t.In(loc), false, nil
 }
 
-// appointmentToEvent builds the writable event body for an app-managed appointment.
+// appointmentToEvent builds the writable event body for an app-managed
+// appointment. Description and Location are always sent, so clearing them in
+// the app clears them in Google too (a plain omitempty patch would keep the
+// old text).
 func appointmentToEvent(a domain.Appointment, rem ReminderPolicy) *calendar.Event {
 	ev := &calendar.Event{
 		Summary:     a.Title,
@@ -86,7 +95,8 @@ func appointmentToEvent(a domain.Appointment, rem ReminderPolicy) *calendar.Even
 			propPatientID: a.PatientID,
 			propStatus:    string(a.Status),
 		}},
-		Reminders: rem.toEvent(),
+		Reminders:       rem.toEvent(),
+		ForceSendFields: []string{"Description", "Location"},
 	}
 	if a.AllDay {
 		ev.Start = &calendar.EventDateTime{Date: a.Start.Format("2006-01-02")}
@@ -94,6 +104,19 @@ func appointmentToEvent(a domain.Appointment, rem ReminderPolicy) *calendar.Even
 	} else {
 		ev.Start = &calendar.EventDateTime{DateTime: a.Start.Format(time.RFC3339), TimeZone: a.Start.Location().String()}
 		ev.End = &calendar.EventDateTime{DateTime: a.End.Format(time.RFC3339), TimeZone: a.End.Location().String()}
+	}
+	return ev
+}
+
+// forPatch adapts a body built by appointmentToEvent to a PATCH: when the
+// appointment is timed, the all-day "date" fields are explicitly nulled so an
+// all-day event that was rescheduled to a time stops being all-day.
+func forPatch(ev *calendar.Event) *calendar.Event {
+	if ev.Start != nil && ev.Start.Date == "" {
+		ev.Start.NullFields = []string{"Date"}
+	}
+	if ev.End != nil && ev.End.Date == "" {
+		ev.End.NullFields = []string{"Date"}
 	}
 	return ev
 }

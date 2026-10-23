@@ -30,16 +30,21 @@ func (p Patient) Validate() error {
 	return ve
 }
 
-// Age returns the patient's age in full years at the given instant, or -1 if unknown.
-func (p Patient) Age(now time.Time) int {
+// SessionTitle is the calendar summary used for this patient's sessions.
+// It is a domain rule shared by the use cases and the demo seed.
+func (p Patient) SessionTitle() string { return "Fisio: " + p.Name }
+
+// Age returns the patient's age in full years at the given instant; ok is
+// false when the birth date is unknown.
+func (p Patient) Age(now time.Time) (years int, ok bool) {
 	if p.BirthDate.IsZero() {
-		return -1
+		return 0, false
 	}
-	years := now.Year() - p.BirthDate.Year()
+	years = now.Year() - p.BirthDate.Year()
 	if now.YearDay() < p.BirthDate.YearDay() {
 		years--
 	}
-	return years
+	return years, true
 }
 
 // MatchesQuery reports whether the free-text query matches the patient's name or phone.

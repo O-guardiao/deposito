@@ -46,21 +46,6 @@ func (r *PatientRepo) Get(ctx context.Context, id string) (domain.Patient, error
 	return domain.Patient{}, fmt.Errorf("paciente %q: %w", id, domain.ErrNotFound)
 }
 
-// Search implements domain.PatientRepository.
-func (r *PatientRepo) Search(ctx context.Context, q string) ([]domain.Patient, error) {
-	all, err := r.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := all[:0]
-	for _, p := range all {
-		if p.MatchesQuery(q) {
-			out = append(out, p)
-		}
-	}
-	return out, nil
-}
-
 // Save implements domain.PatientRepository.
 func (r *PatientRepo) Save(ctx context.Context, p domain.Patient) error {
 	return r.t.upsert(ctx, patientToRow(p))
@@ -113,16 +98,24 @@ func (m *Mirror) Upsert(ctx context.Context, a domain.Appointment) error {
 	return m.t.upsert(ctx, appointmentToRow(a))
 }
 
-// Delete implements domain.AppointmentMirror.
-func (m *Mirror) Delete(ctx context.Context, id string) error {
-	return m.t.deleteByKey(ctx, id)
-}
-
-// ReplaceAll implements domain.AppointmentMirror.
-func (m *Mirror) ReplaceAll(ctx context.Context, items []domain.Appointment) error {
-	rows := make([][]string, 0, len(items))
-	for _, a := range items {
+// Reconcile implements domain.AppointmentMirror: the tab is rewritten with
+// the live items, keeping the rows already marked cancelado (they no longer
+// exist in the agenda but are part of the history).
+func (m *Mirror) Reconcile(ctx context.Context, live []domain.Appointment) error {
+	current, err := m.t.rows(ctx)
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(live))
+	rows := make([][]string, 0, len(live)+len(current))
+	for _, a := range live {
+		seen[a.ID] = true
 		rows = append(rows, appointmentToRow(a))
+	}
+	for _, row := range current {
+		if st, _ := domain.ParseStatus(cell(row, 5)); st == domain.StatusCancelled && !seen[cell(row, 0)] {
+			rows = append(rows, row)
+		}
 	}
 	return m.t.replaceAll(ctx, rows)
 }

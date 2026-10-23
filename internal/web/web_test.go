@@ -19,19 +19,20 @@ import (
 
 var loc, _ = time.LoadLocation("America/Sao_Paulo")
 
+// fixedNow pins "today" so handlers that derive dates are deterministic:
+// Thursday 22/10/2026 14:00 in São Paulo.
+var fixedNow = time.Date(2026, 10, 22, 14, 0, 0, 0, loc)
+
+func newServices(store *memory.Store) *app.Services {
+	return app.NewServices(app.Deps{Patients: store.Patients, Evolutions: store.Evolutions, Agenda: store.Agenda, Mirror: store.Mirror, IDs: store.IDs,
+		Clock: domain.ClockFunc(func() time.Time { return fixedNow }), Location: loc})
+}
+
 func newServer(t *testing.T) (http.Handler, *memory.Store) {
 	t.Helper()
 	store := memory.NewStore()
-	now := time.Now()
-	store.SeedDemo(now, loc)
-	clock := domain.ClockFunc(time.Now)
-	svc := &web.Services{
-		Patients:   app.NewPatientService(store.Patients, store.Evolutions, store.Agenda, store.IDs, clock),
-		Evolutions: app.NewEvolutionService(store.Evolutions, store.Patients, store.IDs, clock),
-		Agenda:     app.NewAgendaService(store.Agenda, store.Mirror, store.Patients, clock, loc),
-		Sync:       app.NewSyncService(store.Agenda, store.Mirror, clock),
-	}
-	s, err := web.New(svc, web.Options{Location: loc, Demo: true})
+	store.SeedDemo(fixedNow, loc)
+	s, err := web.New(newServices(store), web.Options{Location: loc, Demo: true, Clock: domain.ClockFunc(func() time.Time { return fixedNow })})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,10 +69,21 @@ func TestAgendaDayRendersSeededItems(t *testing.T) {
 			t.Errorf("day view missing %q", want)
 		}
 	}
+	if !strings.Contains(body, "Quinta, 22 de outubro de 2026") || !strings.Contains(body, `app.css?v=`) {
+		t.Fatalf("heading or versioned assets missing")
+	}
 	// htmx request gets only the partial.
 	rec = do(t, h, "GET", "/agenda", nil, true)
 	if b := rec.Body.String(); strings.Contains(b, "<!doctype") || !strings.Contains(b, `id="agenda-main"`) {
 		t.Fatalf("partial expected, got: %.200s", b)
+	}
+	// Finished sessions offer no "Cancelar".
+	rec = do(t, h, "GET", "/agenda?data=2026-10-15", nil, true)
+	if b := rec.Body.String(); !strings.Contains(b, "status-concluido") || strings.Contains(b, "/cancelar") {
+		t.Fatalf("done items must not offer cancel: %.300s", b)
+	}
+	if rec := do(t, h, "GET", "/agenda/semana", nil, false); rec.Code != 200 || !strings.Contains(rec.Body.String(), "Semana de 19/10 a 25/10") {
+		t.Fatalf("week default must be the Monday of the current week: %d", rec.Code)
 	}
 	if rec := do(t, h, "GET", "/agenda/semana", nil, false); rec.Code != 200 || !strings.Contains(rec.Body.String(), "week-grid") {
 		t.Fatalf("week: %d", rec.Code)
@@ -145,12 +157,37 @@ func TestPatientSearchAndRecordAnd404(t *testing.T) {
 func TestScheduleFlowViaHTMX(t *testing.T) {
 	h, store := newServer(t)
 	rec := do(t, h, "GET", "/agenda/novo?data=2026-11-03&paciente=P0002", nil, true)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `value="P0002" selected`) || !strings.Contains(rec.Body.String(), `value="2026-11-03T09:00"`) {
-		t.Fatalf("new form: %d %.400s", rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	if rec.Code != 200 || !strings.Contains(body, `value="P0002" selected`) || !strings.Contains(body, `value="2026-11-03T09:00"`) {
+		t.Fatalf("new form: %d %.400s", rec.Code, body)
+	}
+	// In the modal the form posts into the modal body; the server retargets.
+	if !strings.Contains(body, `hx-target="#modal-body"`) || strings.Contains(body, `hx-target="#agenda-main"`) {
+		t.Fatalf("modal form must target #modal-body: %.400s", body)
+	}
+	// As a full page there is no hx-target at all (nothing to point at).
+	if full := do(t, h, "GET", "/agenda/novo?data=2026-11-03", nil, false).Body.String(); strings.Contains(full, "hx-target") || !strings.Contains(full, `action="/agenda"`) {
+		t.Fatal("full-page form must be a plain form")
+	}
+	// Today's default start is the next full hour.
+	if today := do(t, h, "GET", "/agenda/novo", nil, true).Body.String(); !strings.Contains(today, `value="2026-10-22T15:00"`) {
+		t.Fatalf("default start: %.400s", today)
 	}
 	rec = do(t, h, "POST", "/agenda", url.Values{"paciente": {"P0002"}, "inicio": {"2026-11-03T10:30"}, "duracao": {"45"}, "observacoes": {"interfone 72"}}, true)
 	if rec.Code != 200 || rec.Header().Get("HX-Retarget") != "#agenda-main" || !strings.Contains(rec.Header().Get("HX-Trigger"), "Agendado para 03/11") {
 		t.Fatalf("schedule: %d %v", rec.Code, rec.Header())
+	}
+	if rec.Header().Get("HX-Trigger-After-Swap") != `{"closeModal":true}` || rec.Header().Get("HX-Push-Url") != "/agenda?data=2026-11-03" {
+		t.Fatalf("modal must close after the swap and the URL follow the day: %v", rec.Header())
+	}
+	// Header JSON is pure ASCII (browsers read headers as Latin-1).
+	for _, c := range rec.Header().Get("HX-Trigger") {
+		if c > 127 {
+			t.Fatalf("HX-Trigger must be ASCII-only: %q", rec.Header().Get("HX-Trigger"))
+		}
+	}
+	if !strings.Contains(rec.Header().Get("HX-Trigger"), `às 10:30`) {
+		t.Fatalf("accents must be \u-escaped: %q", rec.Header().Get("HX-Trigger"))
 	}
 	if !strings.Contains(rec.Body.String(), "interfone 72") || !strings.Contains(rec.Body.String(), "10:30") {
 		t.Fatal("day view after scheduling should show the new item")
@@ -173,23 +210,102 @@ func TestScheduleFlowViaHTMX(t *testing.T) {
 	if rec.Header().Get("HX-Redirect") != "/pacientes/P0002" {
 		t.Fatalf("voltar: %v", rec.Header())
 	}
+	// ...but never to another site.
+	rec = do(t, h, "POST", "/agenda", url.Values{"paciente": {"P0002"}, "inicio": {"2026-11-05T09:00"}, "voltar": {"https://evil.example/x"}}, false)
+	if rec.Header().Get("Location") != "/agenda?data=2026-11-05" {
+		t.Fatalf("open redirect: %s", rec.Header().Get("Location"))
+	}
+	// Saving from the week view answers with the week fragment.
+	rec = do(t, h, "POST", "/agenda", url.Values{"paciente": {"P0002"}, "inicio": {"2026-11-05T11:00"}, "vista": {"semana"}}, true)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "week-grid") || rec.Header().Get("HX-Push-Url") != "/agenda/semana?inicio=2026-11-02" {
+		t.Fatalf("week origin: %d %v", rec.Code, rec.Header())
+	}
+	// The patient record "Agendar" button carries the return path.
+	if rec := do(t, h, "GET", "/pacientes/P0002", nil, false); !strings.Contains(rec.Body.String(), `/agenda/novo?paciente=P0002&voltar=/pacientes/P0002`) {
+		t.Fatal("record should open the form with voltar")
+	}
+}
+
+func TestMirrorWarningIsShownNotFatal(t *testing.T) {
+	h, store := newServer(t)
+	store.Mirror.Fail = errors.New("quota exceeded")
+	rec := do(t, h, "POST", "/agenda", url.Values{"paciente": {"P0002"}, "inicio": {"2026-11-03T10:30"}}, true)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "planilha não foi atualizada") || !strings.Contains(rec.Body.String(), "10:30") {
+		t.Fatalf("mirror warning path: %d %.300s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, "POST", "/agenda", url.Values{"paciente": {"P0002"}, "inicio": {"2026-11-03T12:30"}}, false)
+	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Set-Cookie"), "aten%C3%A7%C3%A3o") {
+		t.Fatalf("plain submit must redirect with the warning in the flash: %d %v", rec.Code, rec.Header())
+	}
+}
+
+func TestSecurityMiddleware(t *testing.T) {
+	h, _ := newServer(t)
+	// Cross-site POST is refused.
+	req := httptest.NewRequest("POST", "/pacientes", strings.NewReader("nome=CSRF"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin POST: %d", rec.Code)
+	}
+	req = httptest.NewRequest("POST", "/pacientes", strings.NewReader("nome=CSRF"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-site fetch POST: %d", rec.Code)
+	}
+	// Same-origin is fine.
+	req = httptest.NewRequest("POST", "/pacientes", strings.NewReader("nome=Ok"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://example.com")
+	req.Host = "example.com"
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("same-origin POST: %d", rec.Code)
+	}
+	// Oversized bodies are rejected.
+	big := url.Values{"nome": {strings.Repeat("x", 100<<10)}}
+	if rec := do(t, h, "POST", "/pacientes", big, false); rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized body: %d", rec.Code)
+	}
+	// Unknown paths get the styled 404; wrong methods keep 405.
+	if rec := do(t, h, "GET", "/nada", nil, false); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "Não encontrado") {
+		t.Fatalf("styled 404: %d", rec.Code)
+	}
+	if rec := do(t, h, "POST", "/agenda/semana", nil, false); rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("405 expected: %d", rec.Code)
+	}
+	// Static assets: versioned URLs are immutable, bare ones revalidate.
+	if rec := do(t, h, "GET", "/static/app.css?v=abc", nil, false); rec.Code != 200 || !strings.Contains(rec.Header().Get("Cache-Control"), "immutable") {
+		t.Fatalf("versioned asset cache: %d %s", rec.Code, rec.Header().Get("Cache-Control"))
+	}
+	if rec := do(t, h, "GET", "/static/app.css", nil, false); rec.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("bare asset cache: %s", rec.Header().Get("Cache-Control"))
+	}
 }
 
 func TestAppointmentActions(t *testing.T) {
 	h, store := newServer(t)
 	ctx := t.Context()
-	all, _ := store.Agenda.ListBetween(ctx, time.Now().Add(-24*time.Hour), time.Now().Add(30*24*time.Hour))
+	// Seeded fixtures: Beatriz today 16:30 (linked, scheduled) and the
+	// unlinked "Dona Lúcia" at 13:00.
+	today, _ := store.Agenda.ListBetween(ctx, fixedNow.Add(-14*time.Hour), fixedNow.Add(10*time.Hour))
 	var linked, loose domain.Appointment
-	for _, a := range all {
-		if a.Linked() && a.Status == domain.StatusScheduled && linked.ID == "" {
+	for _, a := range today {
+		if a.Title == "Fisio: Beatriz Oliveira" {
 			linked = a
 		}
-		if !a.Linked() && loose.ID == "" {
+		if a.Title == "Dona Lúcia - avaliação" {
 			loose = a
 		}
 	}
 	if linked.ID == "" || loose.ID == "" {
-		t.Fatal("seed should contain linked and unlinked items")
+		t.Fatalf("seed fixtures missing: %+v", today)
 	}
 	rec := do(t, h, "POST", "/agenda/"+linked.ID+"/concluir", nil, true)
 	if rec.Code != 200 || !strings.Contains(rec.Header().Get("HX-Trigger"), "concluído") {
@@ -213,6 +329,9 @@ func TestAppointmentActions(t *testing.T) {
 	rec = do(t, h, "POST", "/agenda/"+linked.ID+"/cancelar", nil, false)
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/agenda?data=2026-12-01" {
 		t.Fatalf("cancel: %d %s", rec.Code, rec.Header().Get("Location"))
+	}
+	if m, ok := store.Mirror.Get(linked.ID); !ok || m.Status != domain.StatusCancelled {
+		t.Fatalf("mirror should record the cancellation: %+v %v", m, ok)
 	}
 	if _, err := store.Agenda.Get(ctx, linked.ID); !domain.IsNotFound(err) {
 		t.Fatal("cancelled item should be removed")
@@ -259,20 +378,24 @@ func (f *fakeLogin) Exchange(_ context.Context, code string) error {
 	f.connected = true
 	return nil
 }
+func (f *fakeLogin) NeedsReconnect(err error) bool { return errors.Is(err, errRevoked) }
+func (f *fakeLogin) Forget()                       { f.connected = false }
+
+var errRevoked = errors.New("invalid_grant")
+
+// failingAgenda simulates Google refusing the saved credentials.
+type failingAgenda struct{ domain.Agenda }
+
+func (failingAgenda) ListBetween(context.Context, time.Time, time.Time) ([]domain.Appointment, error) {
+	return nil, errRevoked
+}
 
 func TestConnectGateAndOAuthCallback(t *testing.T) {
 	login := &fakeLogin{}
 	built := false
-	s, err := web.New(nil, web.Options{Location: loc, Login: login, Factory: func(context.Context) (*web.Services, error) {
+	s, err := web.New(nil, web.Options{Location: loc, Login: login, Factory: func(context.Context) (*app.Services, error) {
 		built = true
-		store := memory.NewStore()
-		clock := domain.ClockFunc(time.Now)
-		return &web.Services{
-			Patients:   app.NewPatientService(store.Patients, store.Evolutions, store.Agenda, store.IDs, clock),
-			Evolutions: app.NewEvolutionService(store.Evolutions, store.Patients, store.IDs, clock),
-			Agenda:     app.NewAgendaService(store.Agenda, store.Mirror, store.Patients, clock, loc),
-			Sync:       app.NewSyncService(store.Agenda, store.Mirror, clock),
-		}, nil
+		return newServices(memory.NewStore()), nil
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -281,6 +404,10 @@ func TestConnectGateAndOAuthCallback(t *testing.T) {
 	rec := do(t, h, "GET", "/agenda", nil, false)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Conectar com Google") {
 		t.Fatalf("gate: %d", rec.Code)
+	}
+	// A POST from a stale tab is redirected instead of swapping the connect page in.
+	if rec := do(t, h, "POST", "/sincronizar", nil, true); rec.Header().Get("HX-Redirect") != "/" {
+		t.Fatalf("gated POST: %d %v", rec.Code, rec.Header())
 	}
 	if rec := do(t, h, "GET", "/healthz", nil, false); rec.Code != 200 || rec.Body.String() != "ok" {
 		t.Fatal("healthz must bypass the gate")
@@ -312,5 +439,23 @@ func TestConnectGateAndOAuthCallback(t *testing.T) {
 	}
 	if rec := do(t, h, "GET", "/agenda", nil, false); rec.Code != 200 || strings.Contains(rec.Body.String(), "Conectar com Google") {
 		t.Fatalf("after connect: %d", rec.Code)
+	}
+}
+
+func TestRevokedCredentialsBringBackConnectScreen(t *testing.T) {
+	login := &fakeLogin{connected: true}
+	store := memory.NewStore()
+	svc := app.NewServices(app.Deps{Patients: store.Patients, Evolutions: store.Evolutions, Agenda: failingAgenda{store.Agenda}, Mirror: store.Mirror, IDs: store.IDs, Location: loc})
+	s, err := web.New(svc, web.Options{Location: loc, Login: login})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	rec := do(t, h, "GET", "/agenda", nil, false)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" || login.connected || s.Connected() {
+		t.Fatalf("revoked token must drop the session: %d %v connected=%v", rec.Code, rec.Header(), s.Connected())
+	}
+	if rec := do(t, h, "GET", "/agenda", nil, false); !strings.Contains(rec.Body.String(), "Conectar com Google") {
+		t.Fatal("connect screen expected after revocation")
 	}
 }

@@ -27,16 +27,15 @@
 <section id="evolutions" class="card" aria-labelledby="evo-title">
   <h2 id="evo-title">Evolução</h2>
   <form class="form" method="post" action="/pacientes/{{.Patient.ID}}/evolucoes" hx-post="/pacientes/{{.Patient.ID}}/evolucoes" hx-target="#evolutions" hx-swap="outerHTML">
-    {{with .EvoErrors}}{{with index . "_"}}<p class="field-error" role="alert">{{.}}</p>{{end}}{{end}}
     <div class="row">
       <label>Data
         <input type="date" name="data" value="{{isoDate .EvoDate}}" required>
-        {{with .EvoErrors}}{{with index . "date"}}<span class="field-error">{{.}}</span>{{end}}{{end}}
+        {{with fieldError .EvoErrors "date"}}<span class="field-error">{{.}}</span>{{end}}
       </label>
     </div>
     <label>O que foi feito / como o paciente evoluiu
       <textarea name="texto" rows="3" required placeholder="ex.: flexão de joelho 105°, dor 3/10, marcha com bengala">{{.EvoText}}</textarea>
-      {{with .EvoErrors}}{{with index . "text"}}<span class="field-error">{{.}}</span>{{end}}{{end}}
+      {{with fieldError .EvoErrors "text"}}<span class="field-error">{{.}}</span>{{end}}
     </label>
     <div class="form-actions"><button type="submit" class="btn primary">{{template "icon-plus"}}Registrar evolução</button></div>
   </form>

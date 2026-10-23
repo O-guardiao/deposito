@@ -5,6 +5,7 @@ package gsheets
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"google.golang.org/api/sheets/v4"
 )
@@ -20,9 +21,18 @@ type SheetsAPI interface {
 	// SheetIDs maps tab titles to their numeric sheetId.
 	SheetIDs(ctx context.Context, spreadsheetID string) (map[string]int64, error)
 	AddSheet(ctx context.Context, spreadsheetID, title string) error
-	// DeleteRow removes one row (0-based index) from a tab.
-	DeleteRow(ctx context.Context, spreadsheetID string, sheetID int64, rowIndex int64) error
-	CreateSpreadsheet(ctx context.Context, title string, tabs []string) (string, error)
+	// CreateSpreadsheet creates a spreadsheet with the given tabs and returns its ID.
+	CreateSpreadsheet(ctx context.Context, spec SpreadsheetSpec) (string, error)
+}
+
+// SpreadsheetSpec describes a spreadsheet to create. Locale and TimeZone make
+// dates and numbers typed by hand render the way the user expects (pt_BR:
+// dd/MM/yyyy), which is what the app reads back.
+type SpreadsheetSpec struct {
+	Title    string
+	Tabs     []string
+	Locale   string // e.g. "pt_BR"
+	TimeZone string // e.g. "America/Sao_Paulo"
 }
 
 // ServiceAPI adapts *sheets.Service to SheetsAPI.
@@ -31,9 +41,11 @@ type ServiceAPI struct{ svc *sheets.Service }
 // NewServiceAPI wraps a sheets service.
 func NewServiceAPI(svc *sheets.Service) *ServiceAPI { return &ServiceAPI{svc: svc} }
 
-// ReadRows implements SheetsAPI.
+// ReadRows implements SheetsAPI. Values come back as the user sees them
+// (FORMATTED_VALUE), so a phone typed as a number stays "11987654321" and a
+// date typed by hand keeps the spreadsheet's locale format.
 func (s *ServiceAPI) ReadRows(ctx context.Context, id, rng string) ([][]string, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(id, rng).Context(ctx).ValueRenderOption("UNFORMATTED_VALUE").DateTimeRenderOption("FORMATTED_STRING").Do()
+	resp, err := s.svc.Spreadsheets.Values.Get(id, rng).Context(ctx).ValueRenderOption("FORMATTED_VALUE").Do()
 	if err != nil {
 		return nil, err
 	}
@@ -41,11 +53,30 @@ func (s *ServiceAPI) ReadRows(ctx context.Context, id, rng string) ([][]string, 
 	for _, r := range resp.Values {
 		row := make([]string, len(r))
 		for i, c := range r {
-			row[i] = fmt.Sprint(c)
+			row[i] = cellString(c)
 		}
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// cellString renders any JSON cell value as text without scientific notation.
+func cellString(c interface{}) string {
+	switch v := c.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case bool:
+		if v {
+			return "TRUE"
+		}
+		return "FALSE"
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 func toValues(rows [][]string) [][]interface{} {
@@ -101,21 +132,10 @@ func (s *ServiceAPI) AddSheet(ctx context.Context, id, title string) error {
 	return err
 }
 
-// DeleteRow implements SheetsAPI.
-func (s *ServiceAPI) DeleteRow(ctx context.Context, id string, sheetID, row int64) error {
-	req := &sheets.BatchUpdateSpreadsheetRequest{Requests: []*sheets.Request{{
-		DeleteDimension: &sheets.DeleteDimensionRequest{Range: &sheets.DimensionRange{
-			SheetId: sheetID, Dimension: "ROWS", StartIndex: row, EndIndex: row + 1,
-		}},
-	}}}
-	_, err := s.svc.Spreadsheets.BatchUpdate(id, req).Context(ctx).Do()
-	return err
-}
-
 // CreateSpreadsheet implements SheetsAPI.
-func (s *ServiceAPI) CreateSpreadsheet(ctx context.Context, title string, tabs []string) (string, error) {
-	ss := &sheets.Spreadsheet{Properties: &sheets.SpreadsheetProperties{Title: title}}
-	for _, t := range tabs {
+func (s *ServiceAPI) CreateSpreadsheet(ctx context.Context, spec SpreadsheetSpec) (string, error) {
+	ss := &sheets.Spreadsheet{Properties: &sheets.SpreadsheetProperties{Title: spec.Title, Locale: spec.Locale, TimeZone: spec.TimeZone}}
+	for _, t := range spec.Tabs {
 		ss.Sheets = append(ss.Sheets, &sheets.Sheet{Properties: &sheets.SheetProperties{Title: t}})
 	}
 	created, err := s.svc.Spreadsheets.Create(ss).Context(ctx).Do()
