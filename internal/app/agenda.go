@@ -77,7 +77,7 @@ func NewAgendaService(a domain.Agenda, m domain.AppointmentMirror, p domain.Pati
 // Day lists the appointments of one calendar day, sorted by start.
 func (s *AgendaService) Day(ctx context.Context, date time.Time) (DayView, error) {
 	start := domain.StartOfDay(date, s.loc)
-	items, err := s.agenda.ListBetween(ctx, start, nextDay(start))
+	items, err := s.agenda.ListBetween(ctx, start, domain.NextDay(start, s.loc))
 	if err != nil {
 		return DayView{}, fmt.Errorf("listar agenda: %w", err)
 	}
@@ -94,7 +94,7 @@ func (s *AgendaService) Week(ctx context.Context, start time.Time) ([]DayView, e
 	d := first
 	for i := range days {
 		days[i].Date = d
-		d = nextDay(d)
+		d = domain.NextDay(d, s.loc)
 	}
 	items, err := s.agenda.ListBetween(ctx, first, d)
 	if err != nil {
@@ -252,10 +252,6 @@ func (s *AgendaService) mirrored(ctx context.Context, a domain.Appointment) Writ
 		res.MirrorWarning = fmt.Errorf("agenda gravada, mas a planilha não foi atualizada: %w", err)
 	}
 	return res
-}
-
-func nextDay(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, t.Location())
 }
 
 func sortByStart(items []domain.Appointment) {

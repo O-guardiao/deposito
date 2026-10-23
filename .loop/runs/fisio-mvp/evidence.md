@@ -63,3 +63,22 @@ log do servidor: sem "error"/"panic"
 - Integração real com Google (sem credenciais no ambiente): adaptadores compilam
   contra `google.golang.org/api v0.267.0` e são testados com fakes.
 - Experiência no navegador (modal/toast/JS, responsivo): só HTML via curl/httptest.
+
+## Iteração 2 — verificação (2026-10-23)
+
+Comandos: `gofmt -l .`, `go vet ./...`, `go mod tidy -diff`, `go test -race -count=1 -cover ./...` → ver bloco abaixo (gofmt vazio, vet ok, tidy sem diff, todos os pacotes ok).
+
+Navegador (Chromium/Playwright) contra `fisio -demo -addr 127.0.0.1:8089`:
+- Suíte própria `scratchpad/e2e/run.mjs` (mobile 390px + desktop 1280px): **fails: 0** em 23 passos por viewport, incluindo: salvar pelo modal atualiza a agenda sem reload e fecha o modal; toast "Agendado para 22/10 às 18:45" sem mojibake; zero `pageerror`; Remarcar pelo modal atualiza a lista; "Agendar" na ficha cria e mostra em Próximos atendimentos; salvar a partir da semana mantém o grid da semana e a URL /agenda/semana; semana sem overflow horizontal (scrollWidth 390 = innerWidth 390).
+- Script do verificador (`verifier/pw/e2e2.mjs`, porta ajustada): B2 "appointments before 12 after save (no reload) 13 … after reload 13"; B3 remarcar "06:15" sem reload e após reload; B4 concluir 2→3; G nome com TAB/aspas → toast e vínculo funcionam, sem XSS; J mobile: agenda/week/patients/record/form/empty todos `scrollWidth 390 innerWidth 390 ok`; K contraste light mínimo 4.84 (badge agendado 6.69), dark mínimo 6.76.
+- Screenshots em `scratchpad/e2e/shots/` (dia, semana, ficha, modal, dark).
+gofmt -l: []
+go vet: ok
+go mod tidy -diff: empty
+ok  	github.com/o-guardiao/deposito/internal/adapters/gauth	1.040s	coverage: 78.1% of statements
+ok  	github.com/o-guardiao/deposito/internal/adapters/gcalendar	1.029s	coverage: 78.1% of statements
+ok  	github.com/o-guardiao/deposito/internal/adapters/gsheets	1.028s	coverage: 66.3% of statements
+ok  	github.com/o-guardiao/deposito/internal/adapters/ids	1.015s	coverage: 100.0% of statements
+ok  	github.com/o-guardiao/deposito/internal/adapters/memory	1.013s	coverage: 33.3% of statements
+ok  	github.com/o-guardiao/deposito/internal/app	1.020s	coverage: 80.8% of statements
+ok  	github.com/o-guardiao/deposito/internal/web	1.158s	coverage: 80.1% of statements

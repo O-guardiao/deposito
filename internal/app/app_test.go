@@ -209,7 +209,8 @@ func TestWeekAcrossDaylightSaving(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, d := range week {
-		if d.Date.Day() != 5+i || d.Date.Hour() != 0 {
+		// The day the clocks jump has no 00:00; its label is its first instant.
+		if d.Date.Day() != 5+i || (d.Date.Hour() != 0 && d.Date.Day() != 6) {
 			t.Fatalf("day %d label wrong: %v", i, d.Date)
 		}
 		if len(d.Items) != 2 {
@@ -284,5 +285,23 @@ func TestReconcileCopiesLinkedAndKeepsCancelled(t *testing.T) {
 	}
 	if _, ok := f.store.Mirror.Get("stale"); ok {
 		t.Fatal("stale scheduled rows must be dropped")
+	}
+}
+
+func TestDayStartSkipsDaylightSavingGap(t *testing.T) {
+	stgo, err := time.LoadLocation("America/Santiago")
+	if err != nil {
+		t.Skip("tzdata unavailable")
+	}
+	// Chile springs forward at midnight: 2026-09-06 00:00 does not exist.
+	got := domain.DayStart(2026, 9, 6, stgo)
+	if got.Day() != 6 || got.Hour() != 1 {
+		t.Fatalf("want first instant of Sept 6 (01:00 -03), got %v", got)
+	}
+	if n := domain.NextDay(time.Date(2026, 9, 5, 10, 0, 0, 0, stgo), stgo); !n.Equal(got) {
+		t.Fatalf("NextDay: %v", n)
+	}
+	if d := domain.DayStart(2026, 10, 32, stgo); d.Month() != 11 || d.Day() != 1 {
+		t.Fatalf("day overflow: %v", d)
 	}
 }

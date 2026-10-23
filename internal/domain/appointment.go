@@ -70,8 +70,27 @@ func SameDay(a, b time.Time, loc *time.Location) bool {
 	return ay == by && am == bm && ad == bd
 }
 
-// StartOfDay truncates t to midnight in loc.
+// StartOfDay returns the first instant of t's calendar day in loc.
 func StartOfDay(t time.Time, loc *time.Location) time.Time {
 	t = t.In(loc)
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+	return DayStart(t.Year(), t.Month(), t.Day(), loc)
+}
+
+// NextDay returns the first instant of the calendar day after t's day in loc.
+func NextDay(t time.Time, loc *time.Location) time.Time {
+	t = t.In(loc)
+	return DayStart(t.Year(), t.Month(), t.Day()+1, loc)
+}
+
+// DayStart returns the first instant of the given calendar day (day may
+// overflow the month, as in time.Date). When daylight saving removes
+// midnight, time.Date would answer with the previous day's last hour; the
+// first existing instant of the wanted day is returned instead.
+func DayStart(year int, month time.Month, day int, loc *time.Location) time.Time {
+	noon := time.Date(year, month, day, 12, 0, 0, 0, loc) // noon always exists
+	t := time.Date(noon.Year(), noon.Month(), noon.Day(), 0, 0, 0, 0, loc)
+	for t.Day() != noon.Day() && t.Before(noon) {
+		t = t.Add(15 * time.Minute)
+	}
+	return t
 }

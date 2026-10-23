@@ -186,8 +186,8 @@ func TestScheduleFlowViaHTMX(t *testing.T) {
 			t.Fatalf("HX-Trigger must be ASCII-only: %q", rec.Header().Get("HX-Trigger"))
 		}
 	}
-	if !strings.Contains(rec.Header().Get("HX-Trigger"), `às 10:30`) {
-		t.Fatalf("accents must be \u-escaped: %q", rec.Header().Get("HX-Trigger"))
+	if !strings.Contains(rec.Header().Get("HX-Trigger"), `\u00e0s 10:30`) {
+		t.Fatalf("accents must be backslash-u escaped: %q", rec.Header().Get("HX-Trigger"))
 	}
 	if !strings.Contains(rec.Body.String(), "interfone 72") || !strings.Contains(rec.Body.String(), "10:30") {
 		t.Fatal("day view after scheduling should show the new item")
@@ -277,7 +277,7 @@ func TestSecurityMiddleware(t *testing.T) {
 	if rec := do(t, h, "GET", "/nada", nil, false); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "Não encontrado") {
 		t.Fatalf("styled 404: %d", rec.Code)
 	}
-	if rec := do(t, h, "POST", "/agenda/semana", nil, false); rec.Code != http.StatusMethodNotAllowed {
+	if rec := do(t, h, "DELETE", "/agenda", nil, false); rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("405 expected: %d", rec.Code)
 	}
 	// Static assets: versioned URLs are immutable, bare ones revalidate.
@@ -308,7 +308,7 @@ func TestAppointmentActions(t *testing.T) {
 		t.Fatalf("seed fixtures missing: %+v", today)
 	}
 	rec := do(t, h, "POST", "/agenda/"+linked.ID+"/concluir", nil, true)
-	if rec.Code != 200 || !strings.Contains(rec.Header().Get("HX-Trigger"), "concluído") {
+	if rec.Code != 200 || !strings.Contains(rec.Header().Get("HX-Trigger"), `conclu\u00eddo`) {
 		t.Fatalf("done: %d %v", rec.Code, rec.Header())
 	}
 	if a, _ := store.Agenda.Get(ctx, linked.ID); a.Status != domain.StatusDone {

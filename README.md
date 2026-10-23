@@ -36,7 +36,7 @@ atendimentos, histórico e evoluções.
 | Remarcar / concluir / cancelar pelo app | atualiza / marca / remove o evento         | linha atualizada (cancelado fica registrado) |
 | Marcar direto no celular                | evento comum                               | aparece no app como “marcado fora do app”; clique em **Vincular** para ligar ao paciente |
 | Cadastrar paciente / evolução           | —                                          | abas **Pacientes** / **Evolucoes**     |
-| Botão **Sincronizar**                   | lê os últimos 90 dias + próximos 180       | reescreve a aba **Agendamentos**       |
+| Botão **Sincronizar**                   | lê os últimos 90 dias + próximos 180       | reescreve a aba **Agendamentos** (linhas `cancelado` são mantidas) |
 
 O app grava **primeiro na agenda, depois na planilha**. Se a planilha falhar, o
 atendimento não se perde: aparece um aviso e o botão Sincronizar corrige.
@@ -49,6 +49,10 @@ make demo          # ou: go run ./cmd/fisio -demo
 
 Abra <http://localhost:8080>. Os dados são fictícios e ficam só na memória; o
 banner amarelo lembra disso. Serve para conhecer o app e para testes.
+
+Por padrão o app escuta só em `127.0.0.1:8080` (a própria máquina). Para abrir
+para outros aparelhos da rede use `-addr 0.0.0.0:8080`, sabendo que qualquer
+um na rede passa a usar a conta Google conectada.
 
 ## Rodando de verdade (conta Google dela)
 
@@ -92,16 +96,25 @@ faltarem são criadas. Para usar uma agenda secundária em vez da principal,
 
 ### Opções
 
+Cada opção pode ser passada como flag ou como variável de ambiente exportada no
+shell (o app não lê arquivo `.env`; `.env.example` só lista os nomes).
+
 | Flag / variável                        | Padrão                  | Para quê |
 |----------------------------------------|-------------------------|----------|
-| `-addr` / `FISIO_ADDR`                 | `:8080`                 | porta HTTP |
+| `-addr` / `FISIO_ADDR`                 | `127.0.0.1:8080`        | endereço HTTP (só a máquina dela) |
 | `-demo` / `FISIO_DEMO=1`               | off                     | modo demo |
 | `-data` / `FISIO_DATA`                 | `./data`                | token e configuração |
 | `-credentials` / `FISIO_CREDENTIALS`   | `./credentials.json`    | credencial OAuth |
+| `-token` / `FISIO_TOKEN`               | `<data>/token.json`     | onde o token OAuth fica salvo |
 | `-spreadsheet` / `FISIO_SPREADSHEET_ID`| (salvo em data/fisio.json) | planilha |
 | `-calendar` / `FISIO_CALENDAR_ID`      | `primary`               | agenda |
 | `-tz` / `FISIO_TZ`                     | `America/Sao_Paulo`     | fuso dos dias |
 | `-public-url` / `FISIO_PUBLIC_URL`     | `http://localhost:<porta>` | precisa bater com o redirect do Google |
+
+Permissões pedidas ao Google: agenda (ler/editar eventos) e planilhas
+(ler/editar). O app só mexe na planilha “Fisio - Pacientes” e nos eventos que
+você agendar por ele; se o Google revogar o acesso, a tela “Conectar” volta a
+aparecer.
 
 ## Estrutura da planilha
 
@@ -112,7 +125,9 @@ faltarem são criadas. Para usar uma agenda secundária em vez da principal,
 | `Agendamentos` | EventoID, PacienteID, Titulo, Inicio, Fim, Status (`agendado`/`concluido`/`cancelado`), Observacoes, Local, AtualizadoEm |
 
 Ela pode editar as células pela planilha (ex.: corrigir um telefone); o app lê
-tudo a cada acesso. Só não altere a coluna **ID** nem a ordem das colunas.
+tudo a cada acesso, do jeito que aparece na tela (a planilha é criada em
+português, então datas digitadas como `25/12/1980` funcionam). Só não altere a
+coluna **ID** nem a ordem das colunas.
 
 Nos eventos da agenda, o app grava propriedades privadas (`fisio_patient_id`,
 `fisio_status`) — invisíveis no celular, mas é assim que ele sabe de quem é o
@@ -123,8 +138,10 @@ evento.
 ```
 cmd/fisio                 main: flags, wiring, OAuth, shutdown
 internal/domain           entidades (Patient, Evolution, Appointment) e portas (interfaces)
+internal/domain/domaintest  testes de contrato que todo adaptador de porta deve passar
 internal/app              casos de uso: PatientService, EvolutionService, AgendaService, SyncService
 internal/adapters/memory  implementação em memória (demo e testes)
+internal/adapters/ids     gerador de IDs de produção (P-AAAAMMDD-XXXXX)
 internal/adapters/gcalendar  Google Calendar → domain.Agenda
 internal/adapters/gsheets    Google Sheets → repositórios + espelho + bootstrap da planilha
 internal/adapters/gauth      OAuth2 (login, token em disco, refresh)
@@ -142,13 +159,16 @@ make vet
 ## Limitações conhecidas
 
 - **Uso individual.** Um usuário, uma conta Google. Sem login próprio: quem
-  acessar a porta usa a conta conectada — rode só na máquina dela (localhost).
+  acessar a porta usa a conta conectada — por isso o padrão é escutar só em
+  `127.0.0.1`. Formulários de outros sites são recusados (checagem de origem).
 - **Sem cache.** Cada página consulta o Google. Para o volume de uma
   profissional é instantâneo; para dezenas de usuários não serviria.
 - **Agenda principal.** Por padrão lê a agenda principal, então compromissos
   pessoais aparecem como “marcado fora do app” (útil para ver o dia ocupado).
   Use `-calendar` se preferir uma agenda só de trabalho.
 - **Cancelar remove o evento** do Google (fica registrado na planilha como
-  `cancelado`).
+  `cancelado`, e Sincronizar preserva essas linhas).
+- **Sem aviso de conflito.** Dois atendimentos no mesmo horário são aceitos; a
+  visão do dia mostra os dois.
 - Sem lembrete por WhatsApp; o link no telefone do paciente abre o WhatsApp
   para ela mandar a mensagem.

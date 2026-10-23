@@ -63,7 +63,7 @@ p { margin: .25rem 0; }
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: .75rem; padding: .5rem .75rem; background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: var(--shadow); }
 .brand { display: flex; align-items: center; gap: .4rem; font-weight: 700; color: var(--primary); font-size: 1.1rem; }
 .tabs { display: flex; gap: .25rem; margin-left: auto; }
-.tabs a { display: flex; align-items: center; gap: .35rem; padding: .45rem .7rem; border-radius: 999px; color: var(--muted); font-weight: 600; }
+.tabs a { display: flex; align-items: center; gap: .35rem; min-height: 44px; padding: .45rem .8rem; border-radius: 999px; color: var(--muted); font-weight: 600; }
 .tabs a[aria-current="page"] { background: var(--primary-soft); color: var(--primary); }
 .tabs a:hover { text-decoration: none; background: var(--surface-2); }
 .sync { margin: 0; }

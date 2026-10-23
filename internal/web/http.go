@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -74,8 +75,7 @@ func asciiJSON(v any) string {
 			b.WriteByte(raw[0])
 		} else {
 			for _, u := range utf16Encode(r) {
-				b.WriteString(`\u`)
-				b.WriteString(strconv.FormatUint(uint64(u), 16))
+				fmt.Fprintf(&b, `\u%04x`, u)
 			}
 		}
 		raw = raw[size:]
@@ -188,9 +188,9 @@ func parseMinutes(v string, def time.Duration) time.Duration {
 
 // mondayOf returns the Monday 00:00 of the week containing t.
 func mondayOf(t time.Time, loc *time.Location) time.Time {
-	d := domain.StartOfDay(t, loc)
+	d := t.In(loc)
 	offset := (int(d.Weekday()) + 6) % 7
-	return time.Date(d.Year(), d.Month(), d.Day()-offset, 0, 0, 0, 0, loc)
+	return domain.DayStart(d.Year(), d.Month(), d.Day()-offset, loc)
 }
 
 // fieldErrors extracts per-field messages from a validation error.
